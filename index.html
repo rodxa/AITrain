@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local Qwen Coder Agent Trainer</title>
+    <style>
+        html,
+        body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            color: #1f2937;
+            background: #f6f8fb;
+        }
+
+        main {
+            box-sizing: border-box;
+            display: grid;
+            grid-template-rows: auto auto 1fr;
+            max-width: 1320px;
+            height: 100dvh;
+            margin: 0 auto;
+            padding: 14px 16px;
+            overflow: hidden;
+        }
+
+        .workspace {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 360px;
+            gap: 14px;
+            align-items: stretch;
+            min-height: 0;
+            min-width: 0;
+        }
+
+        h1 {
+            margin: 0 0 4px;
+            font-size: 24px;
+            line-height: 1.1;
+        }
+
+        main > p {
+            margin: 0 0 12px;
+            color: #4b5563;
+        }
+
+        .panel {
+            box-sizing: border-box;
+            margin-top: 0;
+            padding: 14px;
+            border: 1px solid #d7dde8;
+            border-radius: 8px;
+            background: #ffffff;
+            min-height: 0;
+            min-width: 0;
+        }
+
+        .trainer-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow: hidden;
+        }
+
+        .chat-panel {
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            height: 100%;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+
+        label {
+            display: grid;
+            gap: 4px;
+            width: min(100%, 560px);
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        .inline {
+            display: flex;
+            width: auto;
+            gap: 8px;
+            align-items: center;
+            font-weight: 700;
+        }
+
+        input[type="text"],
+        select {
+            box-sizing: border-box;
+            width: 100%;
+            border: 1px solid #b8c2d2;
+            border-radius: 6px;
+            padding: 8px 10px;
+            font: inherit;
+        }
+
+        input[type="password"] {
+            box-sizing: border-box;
+            width: 100%;
+            border: 1px solid #b8c2d2;
+            border-radius: 6px;
+            padding: 8px 10px;
+            font: inherit;
+        }
+
+        textarea {
+            box-sizing: border-box;
+            width: 100%;
+            height: 76px;
+            min-height: 56px;
+            resize: vertical;
+            border: 1px solid #b8c2d2;
+            border-radius: 6px;
+            padding: 8px 10px;
+            font: inherit;
+        }
+
+        button {
+            border: 0;
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: #ffffff;
+            background: #0f766e;
+            cursor: pointer;
+            font-weight: 700;
+        }
+
+        button:disabled {
+            background: #8aa5a1;
+            cursor: not-allowed;
+        }
+
+        #status {
+            margin-top: 0;
+            font-weight: 700;
+            min-height: 20px;
+        }
+
+        pre {
+            flex: 1;
+            min-height: 0;
+            max-height: none;
+            overflow: auto;
+            margin: 0;
+            padding: 12px;
+            border-radius: 6px;
+            color: #e5e7eb;
+            background: #111827;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        .chat-log {
+            overflow: auto;
+            display: grid;
+            align-content: start;
+            gap: 8px;
+            margin: 12px 0;
+            padding-right: 4px;
+            min-height: 0;
+            min-width: 0;
+        }
+
+        .message {
+            padding: 8px 10px;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            line-height: 1.35;
+            box-sizing: border-box;
+            min-width: 0;
+        }
+
+        .message.user {
+            justify-self: end;
+            max-width: 88%;
+            color: #ffffff;
+            background: #0f766e;
+        }
+
+        .message.assistant {
+            justify-self: start;
+            max-width: 92%;
+            color: #111827;
+            background: #eef2f7;
+        }
+
+        .chat-actions {
+            display: grid;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .chat-status {
+            min-height: 20px;
+            color: #4b5563;
+            font-size: 14px;
+        }
+
+        .muted {
+            color: #6b7280;
+            font-size: 12px;
+            font-weight: 400;
+        }
+
+        @media (max-width: 980px) {
+            html,
+            body {
+                overflow: auto;
+            }
+
+            main {
+                height: auto;
+                min-height: 100dvh;
+                overflow: visible;
+            }
+
+            .workspace {
+                grid-template-columns: 1fr;
+            }
+
+            .trainer-panel {
+                min-height: 520px;
+            }
+
+            .chat-panel {
+                height: min(640px, 85dvh);
+            }
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>Local Qwen Coder Agent Trainer</h1>
+        <p>Train a QLoRA style adapter for a local coding agent. Default: Qwen2.5-Coder-7B for reliable local training; use 14B later if the large download behaves.</p>
+
+        <div class="workspace">
+            <section class="panel trainer-panel">
+                <label>
+                    Training model
+                    <select id="modelSelect">
+                        <option value="Qwen/Qwen2.5-3B-Instruct" selected>Qwen2.5 3B Instruct - cached, train now</option>
+                        <option value="Qwen/Qwen2.5-Coder-7B-Instruct">Qwen2.5-Coder 7B Instruct - best practical coder if download works</option>
+                        <option value="Qwen/Qwen2.5-Coder-3B-Instruct">Qwen2.5-Coder 3B Instruct - fast test</option>
+                        <option value="Qwen/Qwen2.5-Coder-1.5B-Instruct">Qwen2.5-Coder 1.5B Instruct - very fast test</option>
+                        <option value="Qwen/Qwen2.5-Coder-0.5B-Instruct">Qwen2.5-Coder 0.5B Instruct - smoke test</option>
+                        <option value="Qwen/Qwen2.5-Coder-14B-Instruct">Qwen2.5-Coder 14B Instruct - ambitious download</option>
+                        <option value="Qwen/Qwen2.5-Coder-32B-Instruct">Qwen2.5-Coder 32B Instruct - inference only here</option>
+                        <option value="Qwen/Qwen3-Coder-30B-A3B-Instruct">Qwen3-Coder 30B-A3B - inference only here</option>
+                        <option value="custom">Custom local folder or HF repo</option>
+                    </select>
+                    <span class="muted">Use the cached 3B option to train immediately. 30B/32B are listed for reference and are not practical QLoRA targets here.</span>
+                </label>
+                <label id="customModelLabel" hidden>
+                    Custom model path or repo
+                    <input type="text" id="modelPath" placeholder="C:\models\Qwen2.5-Coder-7B-Instruct or Qwen/...">
+                </label>
+                <label>
+                    Agent instructions
+                    <textarea id="agentInstructions" placeholder="Tell the trained agent how to behave, write, and prioritize coding tasks.">Code professionally first. Be concise, practical, and direct. Preserve my casual writing style where it feels natural, but do not sacrifice correctness. Prioritize coding ability over personality.</textarea>
+                </label>
+                <label>
+                    Hugging Face token
+                    <input type="password" id="hfToken" placeholder="hf_... optional, used only for downloads">
+                </label>
+                <label class="inline">
+                    <input type="checkbox" id="allowDownload" checked>
+                    Download selected Hugging Face model if needed
+                </label>
+                <label class="inline">
+                    <input type="checkbox" id="gpuTrain" checked>
+                    16 GB GPU QLoRA mode: 4-bit, rank 16, coding-first mix
+                </label>
+                <label class="inline">
+                    <input type="checkbox" id="quickTrain">
+                    Quick test only: 5 steps, shorter context
+                </label>
+                <div class="controls">
+                    <input type="file" id="codeFolder" webkitdirectory directory multiple>
+                    <button id="trainButton" type="button">Train Coding Agent</button>
+                    <button id="stopButton" type="button" disabled>Stop</button>
+                    <button id="clearProjectButton" type="button">Clear Text Memory</button>
+                </div>
+                <div id="status">Idle</div>
+                <div id="storageStatus" class="muted"></div>
+                <pre id="log"></pre>
+            </section>
+
+            <aside class="panel chat-panel">
+                <div>
+                    <h2>Chat</h2>
+                    <div id="chatStatus" class="chat-status">Coding adapter ready after training completes.</div>
+                </div>
+                <div id="chatLog" class="chat-log"></div>
+                <div class="chat-actions">
+                    <textarea id="chatInput" placeholder="Ask your trained coding agent..."></textarea>
+                    <div class="controls">
+                        <button id="sendChatButton" type="button">Send</button>
+                        <button id="clearChatButton" type="button">Clear</button>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </main>
+
+    <script>
+        const input = document.getElementById('codeFolder');
+        const modelSelect = document.getElementById('modelSelect');
+        const modelPath = document.getElementById('modelPath');
+        const customModelLabel = document.getElementById('customModelLabel');
+        const agentInstructions = document.getElementById('agentInstructions');
+        const hfToken = document.getElementById('hfToken');
+        const allowDownload = document.getElementById('allowDownload');
+        const gpuTrain = document.getElementById('gpuTrain');
+        const quickTrain = document.getElementById('quickTrain');
+        const trainButton = document.getElementById('trainButton');
+        const stopButton = document.getElementById('stopButton');
+        const clearProjectButton = document.getElementById('clearProjectButton');
+        const statusEl = document.getElementById('status');
+        const storageStatus = document.getElementById('storageStatus');
+        const logEl = document.getElementById('log');
+        const chatLog = document.getElementById('chatLog');
+        const chatInput = document.getElementById('chatInput');
+        const chatStatus = document.getElementById('chatStatus');
+        const sendChatButton = document.getElementById('sendChatButton');
+        const clearChatButton = document.getElementById('clearChatButton');
+        const apiBase = window.location.protocol === 'file:'
+            ? 'http://127.0.0.1:5000'
+            : window.location.origin;
+        const ignoredDirectories = new Set([
+            '.git',
+            '.hg',
+            '.svn',
+            '.venv',
+            'venv',
+            'env',
+            'node_modules',
+            '__pycache__',
+            '.dart_tool',
+            '.gradle',
+            '.idea',
+            'build',
+            'bin',
+            'obj',
+            'ephemeral',
+            'intermediates',
+            'conversation-ai-lora',
+            'qwen-code-2.5-lora',
+            'uploads'
+        ]);
+        const binaryExtensions = new Set([
+            '.7z', '.a', '.apk', '.bin', '.bmp', '.class', '.dll', '.dylib',
+            '.exe', '.gif', '.ico', '.jar', '.jpg', '.jpeg', '.keystore',
+            '.mp3', '.mp4', '.o', '.obj', '.pdf', '.png', '.so', '.ttf',
+            '.webp', '.woff', '.woff2', '.zip'
+        ]);
+        const maxFileBytes = 200000;
+        const maxConversationBytes = 5 * 1024 * 1024;
+        const conversationExtensions = new Set(['.txt', '.log', '.chat', '.md', '.json', '.jsonl']);
+        let pollTimer = null;
+        let chatHistory = [];
+        const inferenceOnlyModels = new Set([
+            'Qwen/Qwen2.5-Coder-32B-Instruct',
+            'Qwen/Qwen3-Coder-30B-A3B-Instruct'
+        ]);
+
+        modelSelect.addEventListener('change', updateModelControls);
+        trainButton.addEventListener('click', startTraining);
+        stopButton.addEventListener('click', stopTraining);
+        clearProjectButton.addEventListener('click', clearProjectMemory);
+        sendChatButton.addEventListener('click', sendChat);
+        clearChatButton.addEventListener('click', clearChat);
+        chatInput.addEventListener('keydown', event => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendChat();
+            }
+        });
+        checkServer();
+        updateModelControls();
+
+        function selectedModelPath() {
+            return modelSelect.value === 'custom'
+                ? modelPath.value.trim()
+                : modelSelect.value;
+        }
+
+        function updateModelControls() {
+            const isCustom = modelSelect.value === 'custom';
+            customModelLabel.hidden = !isCustom;
+            allowDownload.disabled = false;
+            if (inferenceOnlyModels.has(modelSelect.value)) {
+                statusEl.textContent = 'That model is listed for inference/VS Code use, not local QLoRA training on this GPU.';
+            } else if (statusEl.textContent.startsWith('That model is listed')) {
+                statusEl.textContent = 'Idle';
+            }
+        }
+
+        async function startTraining() {
+            const modelChoice = selectedModelPath();
+            if (!modelChoice) {
+                statusEl.textContent = 'Choose a model or enter a custom model path.';
+                return;
+            }
+            if (inferenceOnlyModels.has(modelChoice)) {
+                statusEl.textContent = 'Pick a 0.5B, 1.5B, 3B, 7B, or 14B model for training. 30B/32B are inference-only here.';
+                return;
+            }
+
+            const selectedFiles = Array.from(input.files);
+            const files = selectedFiles.filter(shouldUploadFile);
+            if (files.length === 0) {
+                statusEl.textContent = selectedFiles.length === 0
+                    ? 'Choose a folder first.'
+                    : 'No supported code files found after filtering.';
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('model_path', modelChoice);
+            formData.append('agent_instructions', agentInstructions.value.trim());
+            formData.append('hf_token', hfToken.value.trim());
+            formData.append('allow_model_download', allowDownload.checked ? '1' : '0');
+            formData.append('gpu_train', gpuTrain.checked ? '1' : '0');
+            formData.append('quick_train', quickTrain.checked ? '1' : '0');
+            for (const file of files) {
+                formData.append('files', file, file.webkitRelativePath || file.name);
+            }
+
+            trainButton.disabled = true;
+            stopButton.disabled = false;
+            statusEl.textContent = `Uploading ${files.length} text files...`;
+            logEl.textContent = '';
+
+            try {
+                const response = await fetch(`${apiBase}/train`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await readJson(response);
+
+                if (!response.ok) {
+                    throw new Error(result.error || 'Error starting training.');
+                }
+
+                statusEl.textContent = `Training started with ${result.files} files.`;
+                startPolling();
+            } catch (error) {
+                statusEl.textContent = `${error.message} Server checked at ${apiBase}. Try opening http://127.0.0.1:5000 directly and choose a smaller code folder.`;
+                trainButton.disabled = false;
+                stopButton.disabled = true;
+            }
+        }
+
+        async function stopTraining() {
+            stopButton.disabled = true;
+            statusEl.textContent = 'Stopping training...';
+
+            try {
+                const response = await fetch(`${apiBase}/stop`, { method: 'POST' });
+                const result = await readJson(response);
+                statusEl.textContent = result.message || 'Training stopped.';
+            } catch (error) {
+                statusEl.textContent = `${error.message} Could not stop training from the page.`;
+            } finally {
+                trainButton.disabled = false;
+                clearInterval(pollTimer);
+                pollStatus();
+            }
+        }
+
+        async function clearProjectMemory() {
+            clearProjectButton.disabled = true;
+            statusEl.textContent = 'Clearing project memory...';
+
+            try {
+                const response = await fetch(`${apiBase}/clear-memory`, { method: 'POST' });
+                const result = await readJson(response);
+                if (!response.ok) {
+                    throw new Error(result.error || 'Could not clear project memory.');
+                }
+                statusEl.textContent = result.message;
+                chatStatus.textContent = 'Text memory cleared. Retrain or upload again.';
+            } catch (error) {
+                statusEl.textContent = error.message;
+            } finally {
+                clearProjectButton.disabled = false;
+            }
+        }
+
+        function startPolling() {
+            clearInterval(pollTimer);
+            pollStatus();
+            pollTimer = setInterval(pollStatus, 2000);
+        }
+
+        async function pollStatus() {
+            let response;
+            let result;
+            try {
+                response = await fetch(`${apiBase}/status`);
+                result = await readJson(response);
+            } catch (error) {
+                clearInterval(pollTimer);
+                trainButton.disabled = false;
+                statusEl.textContent = `${error.message} Could not reach ${apiBase}.`;
+                return;
+            }
+
+            logEl.textContent = result.log || '';
+            if (result.storage_dir) {
+                storageStatus.textContent = `Saving data in: ${result.storage_dir}`;
+            }
+            logEl.scrollTop = logEl.scrollHeight;
+
+            if (result.running) {
+                statusEl.textContent = 'Training running...';
+                trainButton.disabled = true;
+                stopButton.disabled = false;
+                return;
+            }
+
+            clearInterval(pollTimer);
+            trainButton.disabled = false;
+            stopButton.disabled = true;
+            statusEl.textContent = result.exit_code === 0
+                ? 'Training completed.'
+                : `Training stopped with exit code ${result.exit_code}.`;
+        }
+
+        async function readJson(response) {
+            const text = await response.text();
+            try {
+                return text ? JSON.parse(text) : {};
+            } catch {
+                throw new Error(`Server returned ${response.status}: ${text.slice(0, 200)}`);
+            }
+        }
+
+        async function checkServer() {
+            try {
+                const response = await fetch(`${apiBase}/ping`);
+                if (!response.ok) {
+                    throw new Error(`Server returned ${response.status}`);
+                }
+                statusEl.textContent = `Connected to ${apiBase}`;
+            } catch {
+                statusEl.textContent = `Cannot reach ${apiBase}. Start the server with python app.py, then open http://127.0.0.1:5000.`;
+            }
+        }
+
+        function shouldUploadFile(file) {
+            const relativePath = file.webkitRelativePath || file.name;
+            const parts = relativePath.split(/[\\/]+/);
+            if (parts.some(part => ignoredDirectories.has(part))) {
+                return false;
+            }
+
+            const name = file.name.toLowerCase();
+            const dotIndex = name.lastIndexOf('.');
+            const extension = dotIndex >= 0 ? name.slice(dotIndex) : '';
+            const maxBytes = conversationExtensions.has(extension) ? maxConversationBytes : maxFileBytes;
+            if (file.size > maxBytes) {
+                return false;
+            }
+
+            return !binaryExtensions.has(extension);
+        }
+
+        async function sendChat() {
+            const message = chatInput.value.trim();
+            if (!message) {
+                return;
+            }
+
+            appendMessage('user', message);
+            chatInput.value = '';
+            sendChatButton.disabled = true;
+            chatStatus.textContent = chatHistory.length === 0
+                ? 'Loading adapter into GPU...'
+                : 'Thinking...';
+
+            try {
+                const response = await fetch(`${apiBase}/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message,
+                        history: chatHistory,
+                        max_new_tokens: 320
+                    })
+                });
+                const result = await readJson(response);
+                if (!response.ok) {
+                    throw new Error(result.error || 'Chat failed.');
+                }
+
+                appendMessage('assistant', result.reply || '(empty response)');
+                chatStatus.textContent = result.used_context
+                    ? `Ready - used text memories, ${chatHistory.length} messages in memory`
+                    : `Ready - adapter only, ${chatHistory.length} messages in memory`;
+            } catch (error) {
+                appendMessage('assistant', error.message);
+                chatStatus.textContent = 'Chat error';
+            } finally {
+                sendChatButton.disabled = false;
+                chatInput.focus();
+            }
+        }
+
+        function appendMessage(role, content) {
+            chatHistory.push({ role, content });
+            const item = document.createElement('div');
+            item.className = `message ${role}`;
+            item.textContent = content;
+            chatLog.appendChild(item);
+            chatLog.scrollTop = chatLog.scrollHeight;
+        }
+
+        function clearChat() {
+            chatHistory = [];
+            chatLog.textContent = '';
+            chatStatus.textContent = 'Ready';
+            chatInput.focus();
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+.git
+__pycache__
+*.pyc
+.venv
+venv
+env
+uploads
+training_data.jsonl
+eval_data.jsonl
+training.log
+conversation-ai-lora
+qwen-code-2.5-lora
+*.safetensors
+*.bin
+*.pt
+*.pth

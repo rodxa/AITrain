@@ -1,0 +1,10 @@
+flask>=3.0
+waitress>=3.0
+torch
+transformers>=4.45
+datasets>=2.20
+accelerate>=0.34
+peft>=0.12
+bitsandbytes>=0.46.1
+sentencepiece
+tiktoken
