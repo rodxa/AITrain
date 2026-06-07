@@ -342,6 +342,30 @@
             font-weight: 800;
         }
 
+        .folder-picker {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 10px 12px;
+            align-items: center;
+        }
+
+        .folder-input {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            overflow: hidden;
+            clip: rect(0 0 0 0);
+            clip-path: inset(50%);
+            white-space: nowrap;
+        }
+
+        .folder-summary {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         input[type="text"],
         input[type="password"],
         select,
@@ -581,6 +605,14 @@
             .status-pill {
                 white-space: normal;
             }
+
+            .folder-picker {
+                grid-template-columns: 1fr;
+            }
+
+            .folder-summary {
+                white-space: normal;
+            }
         }
     </style>
 </head>
@@ -654,12 +686,20 @@
                             <div class="lane-card">
                                 <h3>Personality data</h3>
                                 <span class="muted">Chats, messages, tone samples, phrasing, humor, habits, and style examples.</span>
-                                <input type="file" id="personalityFiles" multiple>
+                                <div class="folder-picker">
+                                    <input type="file" id="personalityFiles" class="folder-input" webkitdirectory directory multiple aria-label="Choose personality data folder">
+                                    <button type="button" class="folder-button" data-picker-target="personalityFiles">Choose Folder</button>
+                                    <span id="personalityFolderSummary" class="muted folder-summary">No folder selected</span>
+                                </div>
                             </div>
                             <div class="lane-card">
                                 <h3>General IQ data</h3>
                                 <span class="muted">Code, notes, docs, Q&A, facts, reasoning examples, and practical knowledge.</span>
-                                <input type="file" id="generalFiles" multiple>
+                                <div class="folder-picker">
+                                    <input type="file" id="generalFiles" class="folder-input" webkitdirectory directory multiple aria-label="Choose general IQ data folder">
+                                    <button type="button" class="folder-button" data-picker-target="generalFiles">Choose Folder</button>
+                                    <span id="generalFolderSummary" class="muted folder-summary">No folder selected</span>
+                                </div>
                             </div>
                         </div>
                         <div class="control-card">
@@ -802,6 +842,8 @@
     <script>
         const personalityInput = document.getElementById('personalityFiles');
         const generalInput = document.getElementById('generalFiles');
+        const personalityFolderSummary = document.getElementById('personalityFolderSummary');
+        const generalFolderSummary = document.getElementById('generalFolderSummary');
         const modelSelect = document.getElementById('modelSelect');
         const modelPath = document.getElementById('modelPath');
         const customModelLabel = document.getElementById('customModelLabel');
@@ -874,6 +916,13 @@
         ]);
 
         modelSelect.addEventListener('change', updateModelControls);
+        document.querySelectorAll('.folder-button').forEach(button => {
+            button.addEventListener('click', () => {
+                document.getElementById(button.dataset.pickerTarget).click();
+            });
+        });
+        personalityInput.addEventListener('change', () => updateFolderSummary(personalityInput, personalityFolderSummary));
+        generalInput.addEventListener('change', () => updateFolderSummary(generalInput, generalFolderSummary));
         personalityWeight.addEventListener('input', updatePriorityReadout);
         trainButton.addEventListener('click', startTraining);
         stopButton.addEventListener('click', stopTraining);
@@ -912,6 +961,19 @@
             priorityReadout.textContent = `${personality} / ${100 - personality}`;
         }
 
+        function updateFolderSummary(input, summaryEl) {
+            const files = Array.from(input.files);
+            if (files.length === 0) {
+                summaryEl.textContent = 'No folder selected';
+                return;
+            }
+
+            const firstPath = files[0].webkitRelativePath || files[0].name;
+            const folderName = firstPath.split(/[\\/]+/)[0] || 'Selected folder';
+            const supportedCount = files.filter(shouldUploadFile).length;
+            summaryEl.textContent = `${folderName} - ${supportedCount} supported text files`;
+        }
+
         async function startTraining() {
             const modelChoice = selectedModelPath();
             if (!modelChoice) {
@@ -930,8 +992,8 @@
             const totalFiles = personalityFiles.length + generalFiles.length;
             if (totalFiles === 0) {
                 statusEl.textContent = selectedPersonalityFiles.length + selectedGeneralFiles.length === 0
-                    ? 'Choose personality files, general IQ files, or both.'
-                    : 'No supported text files found after filtering.';
+                    ? 'Choose a personality data folder, a general IQ data folder, or both.'
+                    : 'No supported text files found in the selected folder after filtering.';
                 return;
             }
 
@@ -962,7 +1024,7 @@
 
             trainButton.disabled = true;
             stopButton.disabled = false;
-            statusEl.textContent = `Uploading ${totalFiles} text files (${personalityFiles.length} personality, ${generalFiles.length} general)...`;
+            statusEl.textContent = `Uploading ${totalFiles} text files from selected folders (${personalityFiles.length} personality, ${generalFiles.length} general)...`;
             logEl.textContent = '';
 
             try {
