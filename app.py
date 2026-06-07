@@ -12,6 +12,34 @@ from werkzeug.utils import secure_filename
 
 
 BASE_DIR = Path(__file__).resolve().parent
+
+
+def load_env_file(path: Path, *, override: bool, protected_keys: set[str]) -> None:
+    if not path.exists():
+        return
+
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if not key:
+            continue
+        protected_value = os.environ.get(key) if key in protected_keys else None
+        if override and (key not in protected_keys or not protected_value):
+            os.environ[key] = value
+        else:
+            if not os.environ.get(key):
+                os.environ[key] = value
+
+
+PROTECTED_ENV_KEYS = set(os.environ)
+load_env_file(BASE_DIR / ".env.example", override=False, protected_keys=PROTECTED_ENV_KEYS)
+load_env_file(BASE_DIR / ".env", override=True, protected_keys=PROTECTED_ENV_KEYS)
+
 STORAGE_DIR = Path(os.environ.get("TRAIN_STORAGE_DIR", BASE_DIR)).resolve()
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR = STORAGE_DIR / "uploads"
@@ -33,11 +61,14 @@ XAVIER_SYSTEM_PROMPT = (
     "Do not sound formal. Still answer the question properly."
 )
 DEFAULT_ADAPTER_SCALE = float(os.environ.get("ADAPTER_SCALE", "0.75"))
+DEFAULT_CHAT_MAX_NEW_TOKENS = int(os.environ.get("CHAT_MAX_NEW_TOKENS", "160"))
 DEFAULT_AGENT_INSTRUCTIONS = os.environ.get(
     "AGENT_INSTRUCTIONS",
     "Code professionally first. Be concise, practical, and direct. Preserve my casual writing style where it feels natural, "
     "but do not sacrifice correctness. Prioritize coding ability over personality.",
 )
+XAVIER_SYSTEM_PROMPT = DEFAULT_AGENT_INSTRUCTIONS
+DEFAULT_AGENT_INSTRUCTIONS = os.environ.get("AGENT_INSTRUCTIONS", "")
 XAVIER_SYSTEM_PROMPT = DEFAULT_AGENT_INSTRUCTIONS
 
 app = Flask(__name__)
@@ -51,9 +82,16 @@ adapter_scale_state = {"value": None}
 def current_agent_instructions() -> str:
     if AGENT_INSTRUCTIONS_FILE.exists():
         text = AGENT_INSTRUCTIONS_FILE.read_text(encoding="utf-8", errors="replace").strip()
-        if text:
-            return text
-    return os.environ.get("AGENT_INSTRUCTIONS", DEFAULT_AGENT_INSTRUCTIONS)
+        return text
+    return ""
+
+
+def env_agent_instructions() -> str:
+    return current_agent_instructions()
+
+
+def env_hf_token() -> str:
+    return os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or ""
 
 
 @app.after_request
@@ -64,12 +102,12 @@ def add_cors_headers(response):
     return response
 
 
-def safe_upload_path(filename: str) -> Path:
+def safe_upload_path(filename: str, upload_root: Path = UPLOAD_DIR) -> Path:
     parts = [secure_filename(part) for part in Path(filename).parts]
     parts = [part for part in parts if part not in {"", ".", ".."}]
     if not parts:
         raise ValueError("Invalid filename")
-    return UPLOAD_DIR.joinpath(*parts)
+    return upload_root.joinpath(*parts)
 
 
 def clear_memory() -> None:
@@ -115,7 +153,7 @@ def get_chat_model():
 
         import torch
         from peft import PeftModel
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
         base_model = load_adapter_base_model(ADAPTER_DIR)
         cuda_available = torch.cuda.is_available()
@@ -129,17 +167,54 @@ def get_chat_model():
             tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True, use_fast=False)
         tokenizer.pad_token = tokenizer.pad_token or tokenizer.eos_token
 
-        model = AutoModelForCausalLM.from_pretrained(
-            base_model,
-            trust_remote_code=True,
-            torch_dtype=torch.bfloat16 if bf16_available else torch.float16 if cuda_available else None,
-            device_map="auto",
-        )
+        model_kwargs = {
+            "trust_remote_code": True,
+            "device_map": "auto",
+        }
+        if cuda_available and os.environ.get("CHAT_USE_4BIT", "1") == "1":
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type=os.environ.get("BNB_4BIT_QUANT_TYPE", "nf4"),
+                bnb_4bit_compute_dtype=torch.bfloat16 if bf16_available else torch.float16,
+                bnb_4bit_use_double_quant=os.environ.get("BNB_4BIT_USE_DOUBLE_QUANT", "1") == "1",
+            )
+        else:
+            model_kwargs["torch_dtype"] = torch.bfloat16 if bf16_available else torch.float16 if cuda_available else None
+
+        model = AutoModelForCausalLM.from_pretrained(base_model, **model_kwargs)
         model = PeftModel.from_pretrained(model, ADAPTER_DIR)
         model.eval()
 
+        if cuda_available:
+            offloaded_devices = {
+                str(device)
+                for device in getattr(model, "hf_device_map", {}).values()
+                if str(device) in {"cpu", "disk"}
+            }
+            if offloaded_devices:
+                chat_state.update({"model": None, "tokenizer": None, "torch": None})
+                torch.cuda.empty_cache()
+                raise RuntimeError(
+                    "The adapter base model is still being offloaded to CPU/disk, so chat would be extremely slow. "
+                    "Use a smaller trained adapter/base model for chat, or keep CHAT_USE_4BIT=1 and retrain/select a model that fits in VRAM."
+                )
+
         chat_state.update({"model": model, "tokenizer": tokenizer, "torch": torch})
         return chat_state
+
+
+def model_input_device(model):
+    hf_device_map = getattr(model, "hf_device_map", None) or {}
+    for device in hf_device_map.values():
+        device_text = str(device)
+        if device_text not in {"cpu", "disk", "meta"}:
+            return device_text
+
+    for parameter in model.parameters():
+        if parameter.device.type != "meta":
+            return parameter.device
+
+    return "cuda:0" if chat_state.get("torch") is not None and chat_state["torch"].cuda.is_available() else "cpu"
 
 
 def blocked_token_ids(tokenizer):
@@ -307,15 +382,17 @@ def pack_chat_history(history: list[dict[str, str]], max_chars: int = 12000) -> 
 
 
 def xavier_chat_messages(history: list[dict[str, str]], message: str, memory_context: str = "") -> list[dict[str, str]]:
-    messages = [{"role": "system", "content": current_agent_instructions()}]
+    messages = []
+    agent_instructions = current_agent_instructions()
+    if agent_instructions:
+        messages.append({"role": "system", "content": agent_instructions})
     messages.extend(pack_chat_history(history))
     if memory_context:
         messages.append(
             {
                 "role": "user",
                 "content": (
-                    "Relevant uploaded memories/text snippets. Use these quietly for facts and style, "
-                    "but answer the actual message normally according to the system instructions.\n\n"
+                    "Relevant uploaded data snippets. Use them only if they help answer the message.\n\n"
                     f"{memory_context}\n\n"
                     f"Message: {message}"
                 ),
@@ -333,7 +410,14 @@ def index():
 
 @app.route("/ping")
 def ping():
-    return jsonify({"ok": True})
+    hf_token = env_hf_token()
+    return jsonify({
+        "ok": True,
+        "agent_instructions": env_agent_instructions(),
+        "hf_token": hf_token,
+        "has_hf_token": bool(hf_token),
+        "hf_token_length": len(hf_token),
+    })
 
 
 @app.route("/clear-memory", methods=["POST"])
@@ -372,11 +456,11 @@ def chat():
         messages = xavier_chat_messages(history, message, memory_context)
 
         text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = tokenizer(text, return_tensors="pt").to(model.device)
+        inputs = tokenizer(text, return_tensors="pt").to(model_input_device(model))
         temperature = float(payload.get("temperature") or 0.7)
         generation_args = {
             **inputs,
-            "max_new_tokens": int(payload.get("max_new_tokens") or 320),
+            "max_new_tokens": int(payload.get("max_new_tokens") or DEFAULT_CHAT_MAX_NEW_TOKENS),
             "do_sample": temperature > 0,
             "repetition_penalty": 1.15,
             "no_repeat_ngram_size": 4,
@@ -405,22 +489,28 @@ def train():
     if training_process and training_process.poll() is None:
         return jsonify({"error": "Training is already running"}), 409
 
-    files = request.files.getlist("files")
-    if not files:
+    file_groups = [
+        ("personality", request.files.getlist("personality_files")),
+        ("general", request.files.getlist("general_files")),
+        ("general", request.files.getlist("files")),
+    ]
+    if not any(files for _, files in file_groups):
         return jsonify({"error": "No files uploaded"}), 400
 
     clear_memory()
     UPLOAD_DIR.mkdir(exist_ok=True)
     saved_count = 0
 
-    for uploaded_file in files:
-        if not uploaded_file.filename:
-            continue
+    for group_name, files in file_groups:
+        group_dir = UPLOAD_DIR / group_name
+        for uploaded_file in files:
+            if not uploaded_file.filename:
+                continue
 
-        file_path = safe_upload_path(uploaded_file.filename)
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        uploaded_file.save(file_path)
-        saved_count += 1
+            file_path = safe_upload_path(uploaded_file.filename, group_dir)
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            uploaded_file.save(file_path)
+            saved_count += 1
 
     if saved_count == 0:
         return jsonify({"error": "No valid files uploaded"}), 400
@@ -430,16 +520,24 @@ def train():
     child_env = os.environ.copy()
     child_env["TRAIN_STORAGE_DIR"] = str(STORAGE_DIR)
     agent_instructions = request.form.get("agent_instructions", "").strip()
-    if not agent_instructions:
-        agent_instructions = DEFAULT_AGENT_INSTRUCTIONS
     AGENT_INSTRUCTIONS_FILE.write_text(agent_instructions, encoding="utf-8")
-    if agent_instructions:
-        child_env["AGENT_INSTRUCTIONS"] = agent_instructions
+    child_env["AGENT_INSTRUCTIONS"] = agent_instructions
+
+    assistant_speaker_name = request.form.get("assistant_speaker_name", "").strip()
+    child_env["ASSISTANT_SPEAKER_NAME"] = assistant_speaker_name
+    child_env["PERSONALITY_WEIGHT"] = request.form.get("personality_weight", "40").strip() or "40"
+    child_env["GENERAL_WEIGHT"] = request.form.get("general_weight", "60").strip() or "60"
+    child_env["CHAT_CONTEXT_MIN"] = request.form.get("chat_context_min", "1").strip() or "1"
+    child_env["CHAT_CONTEXT_MAX"] = request.form.get("chat_context_max", "15").strip() or "15"
 
     hf_token = request.form.get("hf_token", "").strip()
     if hf_token:
         child_env["HF_TOKEN"] = hf_token
         child_env["HUGGING_FACE_HUB_TOKEN"] = hf_token
+    elif child_env.get("HF_TOKEN"):
+        child_env["HUGGING_FACE_HUB_TOKEN"] = child_env["HF_TOKEN"]
+    elif child_env.get("HUGGING_FACE_HUB_TOKEN"):
+        child_env["HF_TOKEN"] = child_env["HUGGING_FACE_HUB_TOKEN"]
 
     model_path = request.form.get("model_path", "").strip()
     if model_path in INFERENCE_ONLY_MODELS:
@@ -458,7 +556,6 @@ def train():
     child_env.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")
     child_env.setdefault("HF_HUB_ETAG_TIMEOUT", "60")
     child_env.setdefault("USE_QLORA", "1")
-    child_env.setdefault("STYLE_RATIO", "0.10")
     child_env.setdefault("LORA_TARGET_MODE", "all")
 
     if request.form.get("quick_train") == "1":
@@ -470,16 +567,24 @@ def train():
         child_env["GRAD_ACCUM_STEPS"] = "1"
         child_env["EPOCHS"] = "1"
 
-    if request.form.get("gpu_train") == "1":
+    if request.form.get("gpu_train") == "1" and request.form.get("quick_train") != "1":
         child_env["GPU_TRAIN"] = "1"
-        child_env.setdefault("MAX_LENGTH", "1024")
+        child_env["MAX_LENGTH"] = request.form.get("max_length", "").strip() or child_env.get("MAX_LENGTH", "1024")
         child_env.setdefault("BATCH_SIZE", "1")
         child_env.setdefault("GRAD_ACCUM_STEPS", "16")
-        child_env.setdefault("LORA_R", "16")
-        child_env.setdefault("LORA_ALPHA", "16")
+        child_env["LORA_R"] = request.form.get("lora_rank", "").strip() or child_env.get("LORA_R", "16")
+        child_env["LORA_ALPHA"] = request.form.get("lora_alpha", "").strip() or child_env.get("LORA_ALPHA", child_env["LORA_R"])
         child_env.setdefault("LORA_DROPOUT", "0.05")
-        child_env.setdefault("LEARNING_RATE", "5e-5")
-        child_env.setdefault("EPOCHS", "1")
+        child_env["LEARNING_RATE"] = request.form.get("learning_rate", "").strip() or child_env.get("LEARNING_RATE", "5e-5")
+        child_env["EPOCHS"] = request.form.get("epochs", "").strip() or child_env.get("EPOCHS", "1")
+    elif request.form.get("gpu_train") == "1":
+        child_env["GPU_TRAIN"] = "1"
+    elif request.form.get("quick_train") != "1":
+        child_env["MAX_LENGTH"] = request.form.get("max_length", "").strip() or child_env.get("MAX_LENGTH", "1536")
+        child_env["LORA_R"] = request.form.get("lora_rank", "").strip() or child_env.get("LORA_R", "16")
+        child_env["LORA_ALPHA"] = request.form.get("lora_alpha", "").strip() or child_env.get("LORA_ALPHA", child_env["LORA_R"])
+        child_env["LEARNING_RATE"] = request.form.get("learning_rate", "").strip() or child_env.get("LEARNING_RATE", "5e-5")
+        child_env["EPOCHS"] = request.form.get("epochs", "").strip() or child_env.get("EPOCHS", "1")
 
     log_handle = LOG_FILE.open("w", encoding="utf-8")
     training_process = subprocess.Popen(

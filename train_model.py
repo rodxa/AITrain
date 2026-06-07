@@ -65,19 +65,18 @@ DEFAULT_MAX_FILE_BYTES = int(os.environ.get("MAX_FILE_BYTES", "200000"))
 MAX_CONVERSATION_BYTES = int(os.environ.get("MAX_CONVERSATION_BYTES", str(5 * 1024 * 1024)))
 CHUNK_CHARS = int(os.environ.get("CHUNK_CHARS", "3500"))
 CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "500"))
-ASSISTANT_SPEAKER_NAME = os.environ.get("ASSISTANT_SPEAKER_NAME", "Xavier")
-DEFAULT_AGENT_INSTRUCTIONS = (
-    "Code professionally first. Be concise, practical, and direct. Preserve my casual writing style where it feels natural, "
-    "but do not sacrifice correctness. Prioritize coding ability over personality."
-)
+ASSISTANT_SPEAKER_NAME = os.environ.get("ASSISTANT_SPEAKER_NAME", "").strip()
+DEFAULT_AGENT_INSTRUCTIONS = ""
 AGENT_INSTRUCTIONS = os.environ.get("AGENT_INSTRUCTIONS", DEFAULT_AGENT_INSTRUCTIONS)
-CONTEXT_MIN_MESSAGES = int(os.environ.get("WHATSAPP_CONTEXT_MIN", "3"))
-CONTEXT_MAX_MESSAGES = int(os.environ.get("WHATSAPP_CONTEXT_MAX", "15"))
-STYLE_RATIO = float(os.environ.get("STYLE_RATIO", "0.10"))
+CONTEXT_MIN_MESSAGES = int(os.environ.get("CHAT_CONTEXT_MIN", os.environ.get("WHATSAPP_CONTEXT_MIN", "1")))
+CONTEXT_MAX_MESSAGES = int(os.environ.get("CHAT_CONTEXT_MAX", os.environ.get("WHATSAPP_CONTEXT_MAX", "15")))
+STYLE_RATIO = 0.0
 EVAL_RATIO = float(os.environ.get("EVAL_RATIO", "0.08"))
 DATASET_SEED = int(os.environ.get("DATASET_SEED", "42"))
-MAX_STYLE_EXAMPLES = int(os.environ.get("MAX_STYLE_EXAMPLES", "600"))
-HELPFUL_DATA_FILE = os.environ.get("HELPFUL_DATA_FILE", "")
+MAX_STYLE_EXAMPLES = 0
+HELPFUL_DATA_FILE = ""
+PERSONALITY_WEIGHT = max(0, int(os.environ.get("PERSONALITY_WEIGHT", "40")))
+GENERAL_WEIGHT = max(0, int(os.environ.get("GENERAL_WEIGHT", "60")))
 LORA_TARGET_MODE = os.environ.get("LORA_TARGET_MODE", "all").lower()
 XAVIER_SYSTEM_PROMPT = (
     "You are Xavier. You answer helpfully, but your tone is casual, slightly chaotic, short, "
@@ -100,14 +99,8 @@ CODING_SYSTEM_PROMPT = (
     "preserve the base model's coding ability, explain tradeoffs briefly, and write clean code."
 )
 XAVIER_SYSTEM_PROMPT = AGENT_INSTRUCTIONS
-CODING_SYSTEM_PROMPT = (
-    "You are a senior local coding agent. Follow these user-provided training instructions:\n\n"
-    f"{AGENT_INSTRUCTIONS}"
-)
-BASE_PRESERVATION_NOTE = (
-    "Keep the base model's general reasoning, coding, and explanation ability. "
-    "The LoRA should add Xavier's tone and workflow preferences, not replace coding knowledge."
-)
+CODING_SYSTEM_PROMPT = AGENT_INSTRUCTIONS
+BASE_PRESERVATION_NOTE = ""
 STYLE_SYSTEM_PROMPT = XAVIER_SYSTEM_PROMPT
 HELPFUL_SYSTEM_PROMPT = CODING_SYSTEM_PROMPT
 USELESS_REPLY_EXACT = {
@@ -300,6 +293,8 @@ def role_from_json_message(message: dict) -> str:
         return "assistant"
     if role.lower() in {"user", "human"}:
         return "user"
+    if role.lower() == "system":
+        return "system"
     return normalize_speaker(role)
 
 
@@ -319,7 +314,7 @@ def parse_json_chat_messages(content: str) -> list[dict[str, str]]:
             if is_bad_message(content_text):
                 continue
             role = role_from_json_message(item)
-            if role not in {"user", "assistant"}:
+            if role not in {"system", "user", "assistant"}:
                 continue
             messages.append({"role": role, "content": content_text})
 
@@ -372,7 +367,7 @@ def coalesce_consecutive_messages(messages: list[dict[str, str]]) -> list[dict[s
     return coalesced
 
 
-def build_style_examples_from_messages(path: str, messages: list[dict[str, str]]) -> list[dict]:
+def build_style_examples_from_messages(path: str, messages: list[dict[str, str]], source_kind: str) -> list[dict]:
     rows: list[dict] = []
     messages = coalesce_consecutive_messages(messages)
 
@@ -395,12 +390,12 @@ def build_style_examples_from_messages(path: str, messages: list[dict[str, str]]
         elif len(history) < CONTEXT_MIN_MESSAGES and index >= CONTEXT_MIN_MESSAGES:
             continue
 
-        row_messages = [{"role": "system", "content": STYLE_SYSTEM_PROMPT}, *history, message]
+        row_messages = with_optional_system(history, message, STYLE_SYSTEM_PROMPT)
         rows.append(
             {
                 "path": path,
                 "chunk": len(rows) + 1,
-                "source": "xavier_style_whatsapp",
+                "source": f"{source_kind}_conversation",
                 "messages": row_messages,
                 "text": messages_to_plain_text(row_messages),
             }
@@ -409,7 +404,7 @@ def build_style_examples_from_messages(path: str, messages: list[dict[str, str]]
     return rows
 
 
-def build_reply_examples(path: str, content: str, suffix: str) -> list[dict]:
+def build_reply_examples(path: str, content: str, suffix: str, source_kind: str) -> list[dict]:
     messages: list[dict[str, str]] = []
     if suffix in {".json", ".jsonl"}:
         messages = parse_json_chat_messages(content)
@@ -419,12 +414,26 @@ def build_reply_examples(path: str, content: str, suffix: str) -> list[dict]:
     if not messages:
         return []
 
-    return build_style_examples_from_messages(path, messages)
+    return build_style_examples_from_messages(path, messages, source_kind)
 
 
 def messages_to_plain_text(messages: list[dict[str, str]]) -> str:
-    names = {"system": "System", "user": "User", "assistant": ASSISTANT_SPEAKER_NAME}
+    names = {"system": "System", "user": "User", "assistant": ASSISTANT_SPEAKER_NAME or "Assistant"}
     return "\n".join(f"{names.get(item['role'], item['role'])}: {item['content']}" for item in messages)
+
+
+def with_optional_system(
+    history: list[dict[str, str]],
+    assistant_message: dict[str, str],
+    system_prompt: str = "",
+) -> list[dict[str, str]]:
+    messages = []
+    system_prompt = clean_message_text(system_prompt)
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.extend(history)
+    messages.append(assistant_message)
+    return messages
 
 
 def legacy_helpful_examples_unused() -> list[dict]:
@@ -743,15 +752,41 @@ def split_eval_rows(rows: list[dict]) -> tuple[list[dict], list[dict]]:
     return shuffled[eval_count:], shuffled[:eval_count]
 
 
+def repeat_rows_for_weight(rows: list[dict], weight: int) -> list[dict]:
+    if not rows or weight <= 0:
+        return []
+    repeats = max(1, round(weight / 10))
+    weighted_rows = []
+    for repeat_index in range(repeats):
+        for row in rows:
+            item = dict(row)
+            item["weight_repeat"] = repeat_index + 1
+            weighted_rows.append(item)
+    return weighted_rows
+
+
+def mix_data_lanes(personality_rows: list[dict], general_rows: list[dict]) -> list[dict]:
+    weighted_rows = [
+        *repeat_rows_for_weight(personality_rows, PERSONALITY_WEIGHT),
+        *repeat_rows_for_weight(general_rows, GENERAL_WEIGHT),
+    ]
+    if not weighted_rows:
+        weighted_rows = [*personality_rows, *general_rows]
+
+    rng = random.Random(DATASET_SEED)
+    rng.shuffle(weighted_rows)
+    return weighted_rows
+
+
 def validate_dataset_rows(rows: list[dict]) -> None:
     for index, row in enumerate(rows, start=1):
         messages = row.get("messages")
-        if not isinstance(messages, list) or len(messages) < 3:
-            raise ValueError(f"Dataset row {index} must contain at least system, user, and assistant messages")
-        if messages[0].get("role") != "system":
-            raise ValueError(f"Dataset row {index} must start with a system message")
+        if not isinstance(messages, list) or len(messages) < 2:
+            raise ValueError(f"Dataset row {index} must contain at least user and assistant messages")
         if messages[-1].get("role") != "assistant":
             raise ValueError(f"Dataset row {index} must end with an assistant message")
+        if not any(message.get("role") == "user" for message in messages[:-1]):
+            raise ValueError(f"Dataset row {index} must include a user message before the assistant reply")
         for message in messages:
             if message.get("role") not in {"system", "user", "assistant"}:
                 raise ValueError(f"Dataset row {index} has invalid role: {message.get('role')}")
@@ -810,8 +845,8 @@ def build_dataset() -> tuple[list[dict], list[dict]]:
     if not UPLOAD_DIR.exists():
         raise FileNotFoundError(f"No upload directory found at {UPLOAD_DIR}")
 
-    style_rows: list[dict] = []
-    fallback_rows: list[dict] = []
+    personality_rows: list[dict] = []
+    general_rows: list[dict] = []
     for path in sorted(UPLOAD_DIR.rglob("*")):
         if not path.is_file():
             continue
@@ -821,10 +856,13 @@ def build_dataset() -> tuple[list[dict], list[dict]]:
             continue
 
         relative_path = path.relative_to(UPLOAD_DIR).as_posix()
+        top_level = relative_path.split("/", 1)[0].lower()
+        source_kind = "personality" if top_level == "personality" else "general"
+        target_rows = personality_rows if source_kind == "personality" else general_rows
         file_kind = "conversation/text log" if path.suffix.lower() in CONVERSATION_EXTENSIONS else "file"
-        reply_examples = build_reply_examples(relative_path, content, path.suffix.lower())
+        reply_examples = build_reply_examples(relative_path, content, path.suffix.lower(), source_kind)
         if reply_examples:
-            style_rows.extend(reply_examples)
+            target_rows.extend(reply_examples)
             continue
 
         content = normalize_training_content(path, content)
@@ -832,33 +870,37 @@ def build_dataset() -> tuple[list[dict], list[dict]]:
             continue
         chunks = chunk_text(content)
         for index, chunk in enumerate(chunks, start=1):
-            messages = [
-                {"role": "system", "content": HELPFUL_SYSTEM_PROMPT},
+            prompt = (
+                "Uploaded data:\n\n"
+                f"Source type: {file_kind}\nPath: {relative_path}\nChunk: {index} of {len(chunks)}"
+            )
+            messages = with_optional_system(
+                [
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
                 {
-                    "role": "user",
-                    "content": (
-                        "Use this uploaded material as context. Answer helpfully and keep Xavier's casual tone "
-                        "only where it feels natural.\n\n"
-                        f"Source type: {file_kind}\nPath: {relative_path}\nChunk: {index} of {len(chunks)}\n\n{chunk}"
-                    ),
+                    "role": "assistant",
+                    "content": chunk,
                 },
-                {"role": "assistant", "content": "Got it. I will use this as background context and still answer clearly first."},
-            ]
-            fallback_rows.append(
+                HELPFUL_SYSTEM_PROMPT,
+            )
+            target_rows.append(
                 {
                     "path": relative_path,
                     "chunk": index,
-                    "source": "uploaded_context",
+                    "source": f"{source_kind}_context",
                     "messages": messages,
                     "text": messages_to_plain_text(messages),
                 }
             )
 
-    if not style_rows and not fallback_rows:
+    if not personality_rows and not general_rows:
         raise ValueError("No readable text or conversation files were found in uploads")
 
-    rows = mix_helpful_and_style_examples(style_rows)
-    rows.extend(fallback_rows)
+    rows = mix_data_lanes(personality_rows, general_rows)
     validate_dataset_rows(rows)
     train_rows, eval_rows = split_eval_rows(rows)
 
@@ -870,13 +912,12 @@ def build_dataset() -> tuple[list[dict], list[dict]]:
         for row in eval_rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-    coding_count = sum(1 for row in rows if row.get("source") == "coding")
-    style_coding_count = sum(1 for row in rows if row.get("source") == "xavier_coding_style")
-    style_count = sum(1 for row in rows if row.get("source") == "xavier_style_whatsapp")
+    personality_count = sum(1 for row in rows if str(row.get("source", "")).startswith("personality_"))
+    general_count = sum(1 for row in rows if str(row.get("source", "")).startswith("general_"))
     print(
         f"Built {len(train_rows)} train and {len(eval_rows)} eval examples "
-        f"({coding_count} coding, {style_coding_count} Xavier-style coding, "
-        f"{style_count} WhatsApp style, {len(fallback_rows)} uploaded context)",
+        f"({personality_count} weighted personality, {general_count} weighted general; "
+        f"priority personality={PERSONALITY_WEIGHT}, general={GENERAL_WEIGHT})",
         flush=True,
     )
     return train_rows, eval_rows

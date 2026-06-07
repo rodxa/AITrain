@@ -5,294 +5,751 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Local Qwen Coder Agent Trainer</title>
     <style>
+        :root {
+            color-scheme: dark;
+            --bg: #06152d;
+            --ink: #f8fbff;
+            --muted: #a9bad4;
+            --panel: rgba(10, 27, 55, 0.82);
+            --panel-soft: rgba(17, 42, 78, 0.68);
+            --line: rgba(186, 213, 255, 0.18);
+            --field: rgba(4, 15, 34, 0.76);
+            --accent: #5ee7ff;
+            --accent-strong: #3b82f6;
+            --shadow: 0 12px 34px rgba(0, 10, 28, 0.24);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
         html,
         body {
-            height: 100%;
-            overflow: hidden;
+            min-height: 100%;
         }
 
         body {
             margin: 0;
-            font-family: Arial, sans-serif;
-            color: #1f2937;
-            background: #f6f8fb;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: var(--ink);
+            background: #071832;
+        }
+
+        body::before {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            pointer-events: none;
+            content: "";
+            opacity: 0.22;
+            background-image:
+                linear-gradient(rgba(186, 213, 255, 0.055) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(186, 213, 255, 0.055) 1px, transparent 1px);
+            background-size: 72px 72px;
+            mask-image: linear-gradient(to bottom, #000, transparent 82%);
         }
 
         main {
-            box-sizing: border-box;
             display: grid;
-            grid-template-rows: auto auto 1fr;
-            max-width: 1320px;
-            height: 100dvh;
+            grid-template-rows: auto auto;
+            width: min(1360px, 100%);
+            min-height: 100dvh;
             margin: 0 auto;
-            padding: 14px 16px;
-            overflow: hidden;
+            padding: 30px;
+            gap: 24px;
+        }
+
+        .topbar {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: end;
+            gap: 28px;
+            padding: 26px 28px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: rgba(9, 31, 63, 0.94);
+            box-shadow: var(--shadow);
+        }
+
+        .brand-mark {
+            display: inline-grid;
+            place-items: center;
+            width: 40px;
+            height: 40px;
+            border: 1px solid rgba(94, 231, 255, 0.42);
+            border-radius: 8px;
+            color: #dff8ff;
+            background: #123b73;
+            font-weight: 900;
+            letter-spacing: 0;
+        }
+
+        .title-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 0;
+        }
+
+        h1,
+        h2 {
+            margin: 0;
+            letter-spacing: 0;
+        }
+
+        h1 {
+            font-size: clamp(28px, 3.2vw, 46px);
+            line-height: 1.04;
+        }
+
+        h2 {
+            font-size: 20px;
+            line-height: 1.2;
+        }
+
+        .intro {
+            max-width: 820px;
+            margin: 14px 0 0 52px;
+            color: var(--muted);
+            line-height: 1.65;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(106px, 1fr));
+            gap: 12px;
+            min-width: 360px;
+        }
+
+        .stat {
+            min-height: 64px;
+            padding: 13px 14px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.065);
+        }
+
+        .stat span {
+            display: block;
+            color: var(--muted);
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .stat strong {
+            display: block;
+            margin-top: 6px;
+            color: var(--ink);
+            font-size: 18px;
+            line-height: 1.1;
         }
 
         .workspace {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) 360px;
-            gap: 14px;
-            align-items: stretch;
+            grid-template-columns: minmax(0, 1fr) minmax(380px, 430px);
+            gap: 24px;
+            align-items: start;
             min-height: 0;
             min-width: 0;
-        }
-
-        h1 {
-            margin: 0 0 4px;
-            font-size: 24px;
-            line-height: 1.1;
-        }
-
-        main > p {
-            margin: 0 0 12px;
-            color: #4b5563;
         }
 
         .panel {
-            box-sizing: border-box;
-            margin-top: 0;
-            padding: 14px;
-            border: 1px solid #d7dde8;
-            border-radius: 8px;
-            background: #ffffff;
-            min-height: 0;
             min-width: 0;
+            min-height: 0;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel);
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(18px);
+        }
+
+        .panel-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 18px;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .eyebrow {
+            margin: 0 0 4px;
+            color: var(--accent);
+            font-size: 11px;
+            font-weight: 900;
+            text-transform: uppercase;
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            min-height: 30px;
+            padding: 6px 10px;
+            border: 1px solid rgba(94, 231, 255, 0.3);
+            border-radius: 999px;
+            color: #c7f7ff;
+            background: rgba(94, 231, 255, 0.1);
+            font-size: 12px;
+            font-weight: 800;
+            white-space: nowrap;
         }
 
         .trainer-panel {
             display: flex;
             flex-direction: column;
-            gap: 10px;
-            overflow: hidden;
+            gap: 22px;
+            overflow: visible;
+            padding: 24px;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 18px;
+        }
+
+        .field-stack {
+            display: grid;
+            gap: 18px;
+            align-content: start;
+            min-width: 0;
+        }
+
+        .option-stack {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            align-content: start;
+        }
+
+        .data-lanes,
+        .advanced-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+        }
+
+        .lane-card,
+        .control-card {
+            display: grid;
+            gap: 12px;
+            padding: 15px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel-soft);
+        }
+
+        .lane-card h3,
+        .control-card h3 {
+            margin: 0;
+            font-size: 15px;
+            letter-spacing: 0;
+        }
+
+        .slider-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .value-pill {
+            min-width: 64px;
+            padding: 6px 9px;
+            border: 1px solid rgba(94, 231, 255, 0.26);
+            border-radius: 999px;
+            color: #d7f8ff;
+            background: rgba(94, 231, 255, 0.09);
+            font-size: 12px;
+            font-weight: 900;
+            text-align: center;
         }
 
         .chat-panel {
             display: grid;
             grid-template-rows: auto 1fr auto;
-            height: 100%;
-            min-width: 0;
+            height: min(780px, calc(100dvh - 220px));
+            min-height: 620px;
             overflow: hidden;
+            padding: 24px;
+            background: var(--panel);
         }
 
         .controls {
             display: flex;
             flex-wrap: wrap;
-            gap: 8px;
+            gap: 12px;
             align-items: center;
         }
 
         label {
             display: grid;
-            gap: 4px;
-            width: min(100%, 560px);
-            font-weight: 700;
-            font-size: 14px;
+            gap: 9px;
+            width: 100%;
+            color: #edf5ff;
+            font-size: 13px;
+            font-weight: 850;
         }
 
         .inline {
             display: flex;
+            align-items: flex-start;
             width: auto;
-            gap: 8px;
-            align-items: center;
-            font-weight: 700;
+            gap: 11px;
+            min-height: 74px;
+            padding: 14px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            color: #deebff;
+            background: var(--panel-soft);
+            line-height: 1.35;
+        }
+
+        input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            margin: 0;
+            accent-color: var(--accent-strong);
+            flex: 0 0 auto;
+        }
+
+        input[type="file"] {
+            width: min(100%, 420px);
+            min-height: 44px;
+            color: var(--muted);
+            font: inherit;
+            font-size: 13px;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            accent-color: var(--accent);
+        }
+
+        input[type="number"] {
+            appearance: textfield;
+        }
+
+        input[type="file"]::file-selector-button {
+            margin-right: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 6px;
+            padding: 8px 10px;
+            color: var(--ink);
+            background: rgba(186, 213, 255, 0.12);
+            cursor: pointer;
+            font-weight: 800;
         }
 
         input[type="text"],
-        select {
-            box-sizing: border-box;
+        input[type="password"],
+        select,
+        textarea {
             width: 100%;
-            border: 1px solid #b8c2d2;
-            border-radius: 6px;
-            padding: 8px 10px;
+            border: 1px solid rgba(186, 213, 255, 0.22);
+            border-radius: 8px;
+            padding: 13px 14px;
+            color: var(--ink);
+            background: var(--field);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
             font: inherit;
+            outline: none;
+            transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
         }
 
-        input[type="password"] {
-            box-sizing: border-box;
-            width: 100%;
-            border: 1px solid #b8c2d2;
-            border-radius: 6px;
-            padding: 8px 10px;
-            font: inherit;
+        select {
+            color: #f8fbf9;
         }
 
         textarea {
-            box-sizing: border-box;
-            width: 100%;
-            height: 76px;
-            min-height: 56px;
+            height: 118px;
+            min-height: 64px;
             resize: vertical;
-            border: 1px solid #b8c2d2;
-            border-radius: 6px;
-            padding: 8px 10px;
-            font: inherit;
+            line-height: 1.45;
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+            border-color: rgba(94, 231, 255, 0.8);
+            box-shadow: 0 0 0 3px rgba(94, 231, 255, 0.16);
+        }
+
+        ::placeholder {
+            color: #7790b2;
         }
 
         button {
-            border: 0;
-            border-radius: 6px;
-            padding: 8px 12px;
-            color: #ffffff;
-            background: #0f766e;
+            min-height: 44px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            padding: 10px 16px;
+            color: #f8fbff;
+            background: #2563eb;
+            box-shadow: none;
             cursor: pointer;
-            font-weight: 700;
+            font: inherit;
+            font-size: 13px;
+            font-weight: 900;
+            transition: transform 150ms ease, filter 150ms ease, opacity 150ms ease;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            filter: brightness(1.05);
         }
 
         button:disabled {
-            background: #8aa5a1;
+            opacity: 0.48;
             cursor: not-allowed;
+            transform: none;
+        }
+
+        #stopButton {
+            color: #fff7f8;
+            background: #e11d48;
+            box-shadow: none;
+        }
+
+        #clearProjectButton,
+        #clearChatButton {
+            color: var(--ink);
+            background: rgba(186, 213, 255, 0.12);
+            box-shadow: none;
         }
 
         #status {
-            margin-top: 0;
-            font-weight: 700;
-            min-height: 20px;
+            min-height: 48px;
+            padding: 13px 15px;
+            border: 1px solid rgba(94, 231, 255, 0.26);
+            border-radius: 8px;
+            color: #d7f8ff;
+            background: rgba(94, 231, 255, 0.09);
+            font-weight: 850;
+            line-height: 1.35;
+        }
+
+        #storageStatus {
+            min-height: 18px;
         }
 
         pre {
             flex: 1;
-            min-height: 0;
-            max-height: none;
+            min-height: 280px;
+            max-height: 440px;
             overflow: auto;
             margin: 0;
-            padding: 12px;
-            border-radius: 6px;
-            color: #e5e7eb;
-            background: #111827;
+            padding: 18px;
+            border: 1px solid rgba(186, 213, 255, 0.16);
+            border-radius: 8px;
+            color: #d8ecff;
+            background: #030b18;
             white-space: pre-wrap;
             overflow-wrap: anywhere;
             word-break: break-word;
+            font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.55;
         }
 
         .chat-log {
-            overflow: auto;
             display: grid;
             align-content: start;
-            gap: 8px;
-            margin: 12px 0;
-            padding-right: 4px;
-            min-height: 0;
+            gap: 12px;
             min-width: 0;
+            min-height: 0;
+            margin: 18px 0;
+            overflow: auto;
+            padding: 4px 4px 4px 0;
         }
 
         .message {
-            padding: 8px 10px;
+            min-width: 0;
+            max-width: 92%;
+            padding: 12px 14px;
+            border: 1px solid var(--line);
             border-radius: 8px;
             white-space: pre-wrap;
             overflow-wrap: anywhere;
             word-break: break-word;
-            line-height: 1.35;
-            box-sizing: border-box;
-            min-width: 0;
+            line-height: 1.42;
+            font-size: 14px;
         }
 
         .message.user {
             justify-self: end;
-            max-width: 88%;
-            color: #ffffff;
-            background: #0f766e;
+            color: #f8fbff;
+            background: #2563eb;
         }
 
         .message.assistant {
             justify-self: start;
-            max-width: 92%;
-            color: #111827;
-            background: #eef2f7;
+            color: #eef6ff;
+            background: rgba(186, 213, 255, 0.1);
         }
 
         .chat-actions {
             display: grid;
-            gap: 8px;
+            gap: 12px;
             min-width: 0;
         }
 
         .chat-status {
             min-height: 20px;
-            color: #4b5563;
-            font-size: 14px;
+            margin-top: 7px;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.35;
+            text-align: right;
         }
 
         .muted {
-            color: #6b7280;
+            color: var(--muted);
             font-size: 12px;
-            font-weight: 400;
+            font-weight: 500;
+            line-height: 1.4;
         }
 
-        @media (max-width: 980px) {
-            html,
-            body {
-                overflow: auto;
-            }
-
+        @media (max-width: 1060px) {
             main {
                 height: auto;
                 min-height: 100dvh;
                 overflow: visible;
             }
 
+            .topbar,
             .workspace {
                 grid-template-columns: 1fr;
             }
 
+            .option-stack {
+                grid-template-columns: 1fr;
+            }
+
+            .data-lanes,
+            .advanced-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .stats {
+                min-width: 0;
+            }
+
+            .intro {
+                margin-left: 0;
+            }
+
             .trainer-panel {
-                min-height: 520px;
+                min-height: 0;
             }
 
             .chat-panel {
-                height: min(640px, 85dvh);
+                height: min(680px, 85dvh);
+                min-height: 520px;
+            }
+        }
+
+        @media (max-width: 620px) {
+            main {
+                padding: 12px;
+            }
+
+            .topbar,
+            .trainer-panel,
+            .chat-panel {
+                padding: 13px;
+            }
+
+            .title-row {
+                align-items: flex-start;
+            }
+
+            .stats {
+                grid-template-columns: 1fr;
+            }
+
+            .panel-heading {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .chat-status {
+                text-align: left;
+            }
+
+            .status-pill {
+                white-space: normal;
             }
         }
     </style>
 </head>
 <body>
     <main>
-        <h1>Local Qwen Coder Agent Trainer</h1>
-        <p>Train a QLoRA style adapter for a local coding agent. Default: Qwen2.5-Coder-7B for reliable local training; use 14B later if the large download behaves.</p>
+        <header class="topbar">
+            <div>
+                <div class="title-row">
+                    <div class="brand-mark" aria-hidden="true">Q</div>
+                    <h1>Local Qwen Coder Agent Trainer</h1>
+                </div>
+                <p class="intro">Train a QLoRA style adapter for a local coding agent. Default: Qwen2.5-Coder-7B for reliable local training; use 14B later if the large download behaves.</p>
+            </div>
+            <div class="stats" aria-label="Training setup highlights">
+                <div class="stat">
+                    <span>Mode</span>
+                    <strong>QLoRA</strong>
+                </div>
+                <div class="stat">
+                    <span>Target</span>
+                    <strong>16 GB GPU</strong>
+                </div>
+                <div class="stat">
+                    <span>Flow</span>
+                    <strong>Train + Chat</strong>
+                </div>
+            </div>
+        </header>
 
         <div class="workspace">
             <section class="panel trainer-panel">
-                <label>
-                    Training model
-                    <select id="modelSelect">
-                        <option value="Qwen/Qwen2.5-3B-Instruct" selected>Qwen2.5 3B Instruct - cached, train now</option>
-                        <option value="Qwen/Qwen2.5-Coder-7B-Instruct">Qwen2.5-Coder 7B Instruct - best practical coder if download works</option>
-                        <option value="Qwen/Qwen2.5-Coder-3B-Instruct">Qwen2.5-Coder 3B Instruct - fast test</option>
-                        <option value="Qwen/Qwen2.5-Coder-1.5B-Instruct">Qwen2.5-Coder 1.5B Instruct - very fast test</option>
-                        <option value="Qwen/Qwen2.5-Coder-0.5B-Instruct">Qwen2.5-Coder 0.5B Instruct - smoke test</option>
-                        <option value="Qwen/Qwen2.5-Coder-14B-Instruct">Qwen2.5-Coder 14B Instruct - ambitious download</option>
-                        <option value="Qwen/Qwen2.5-Coder-32B-Instruct">Qwen2.5-Coder 32B Instruct - inference only here</option>
-                        <option value="Qwen/Qwen3-Coder-30B-A3B-Instruct">Qwen3-Coder 30B-A3B - inference only here</option>
-                        <option value="custom">Custom local folder or HF repo</option>
-                    </select>
-                    <span class="muted">Use the cached 3B option to train immediately. 30B/32B are listed for reference and are not practical QLoRA targets here.</span>
-                </label>
-                <label id="customModelLabel" hidden>
-                    Custom model path or repo
-                    <input type="text" id="modelPath" placeholder="C:\models\Qwen2.5-Coder-7B-Instruct or Qwen/...">
-                </label>
-                <label>
-                    Agent instructions
-                    <textarea id="agentInstructions" placeholder="Tell the trained agent how to behave, write, and prioritize coding tasks.">Code professionally first. Be concise, practical, and direct. Preserve my casual writing style where it feels natural, but do not sacrifice correctness. Prioritize coding ability over personality.</textarea>
-                </label>
-                <label>
-                    Hugging Face token
-                    <input type="password" id="hfToken" placeholder="hf_... optional, used only for downloads">
-                </label>
-                <label class="inline">
-                    <input type="checkbox" id="allowDownload" checked>
-                    Download selected Hugging Face model if needed
-                </label>
-                <label class="inline">
-                    <input type="checkbox" id="gpuTrain" checked>
-                    16 GB GPU QLoRA mode: 4-bit, rank 16, coding-first mix
-                </label>
-                <label class="inline">
-                    <input type="checkbox" id="quickTrain">
-                    Quick test only: 5 steps, shorter context
-                </label>
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">Trainer Console</p>
+                        <h2>Adapter build</h2>
+                    </div>
+                    <div class="status-pill">Local first</div>
+                </div>
+                <div class="form-grid">
+                    <div class="field-stack">
+                        <label>
+                            Training model
+                            <select id="modelSelect">
+                                <option value="Qwen/Qwen2.5-3B-Instruct" selected>Qwen2.5 3B Instruct - cached, train now</option>
+                                <option value="Qwen/Qwen2.5-Coder-7B-Instruct">Qwen2.5-Coder 7B Instruct - best practical coder if download works</option>
+                                <option value="Qwen/Qwen2.5-Coder-3B-Instruct">Qwen2.5-Coder 3B Instruct - fast test</option>
+                                <option value="Qwen/Qwen2.5-Coder-1.5B-Instruct">Qwen2.5-Coder 1.5B Instruct - very fast test</option>
+                                <option value="Qwen/Qwen2.5-Coder-0.5B-Instruct">Qwen2.5-Coder 0.5B Instruct - smoke test</option>
+                                <option value="Qwen/Qwen2.5-Coder-14B-Instruct">Qwen2.5-Coder 14B Instruct - ambitious download</option>
+                                <option value="Qwen/Qwen2.5-Coder-32B-Instruct">Qwen2.5-Coder 32B Instruct - inference only here</option>
+                                <option value="Qwen/Qwen3-Coder-30B-A3B-Instruct">Qwen3-Coder 30B-A3B - inference only here</option>
+                                <option value="custom">Custom local folder or HF repo</option>
+                            </select>
+                            <span class="muted">Use the cached 3B option to train immediately. 30B/32B are listed for reference and are not practical QLoRA targets here.</span>
+                        </label>
+                        <label id="customModelLabel" hidden>
+                            Custom model path or repo
+                            <input type="text" id="modelPath" placeholder="C:\models\Qwen2.5-Coder-7B-Instruct or Qwen/...">
+                        </label>
+                        <label>
+                            Agent instructions
+                            <textarea id="agentInstructions" placeholder="Optional. Leave blank for no system/persona instructions."></textarea>
+                            <span class="muted">This is the only system instruction sent to training and chat. Blank means blank.</span>
+                        </label>
+                        <label>
+                            Assistant speaker name
+                            <input type="text" id="assistantSpeakerName" placeholder="Optional, e.g. your name in WhatsApp logs">
+                            <span class="muted">Used only to parse plain text chat logs. JSON roles like assistant/user do not need this.</span>
+                        </label>
+                        <div class="data-lanes">
+                            <div class="lane-card">
+                                <h3>Personality data</h3>
+                                <span class="muted">Chats, messages, tone samples, phrasing, humor, habits, and style examples.</span>
+                                <input type="file" id="personalityFiles" multiple>
+                            </div>
+                            <div class="lane-card">
+                                <h3>General IQ data</h3>
+                                <span class="muted">Code, notes, docs, Q&A, facts, reasoning examples, and practical knowledge.</span>
+                                <input type="file" id="generalFiles" multiple>
+                            </div>
+                        </div>
+                        <div class="control-card">
+                            <h3>Training priority</h3>
+                            <label>
+                                Personality influence
+                                <div class="slider-row">
+                                    <input type="range" id="personalityWeight" min="0" max="100" value="40">
+                                    <span id="priorityReadout" class="value-pill">40 / 60</span>
+                                </div>
+                                <span class="muted">Higher personality repeats style rows more. Lower personality gives more weight to general IQ data.</span>
+                            </label>
+                        </div>
+                        <div class="advanced-grid">
+                            <label>
+                                Context length
+                                <select id="maxLength">
+                                    <option value="512">512 - safest</option>
+                                    <option value="1024" selected>1024 - balanced</option>
+                                    <option value="1536">1536 - more context</option>
+                                    <option value="2048">2048 - heavier</option>
+                                </select>
+                            </label>
+                            <label>
+                                LoRA rank
+                                <select id="loraRank">
+                                    <option value="4">4 - tiny test</option>
+                                    <option value="8">8 - light</option>
+                                    <option value="16" selected>16 - balanced</option>
+                                    <option value="32">32 - stronger</option>
+                                </select>
+                            </label>
+                            <label>
+                                LoRA alpha
+                                <select id="loraAlpha">
+                                    <option value="8">8</option>
+                                    <option value="16" selected>16</option>
+                                    <option value="32">32</option>
+                                    <option value="64">64</option>
+                                </select>
+                            </label>
+                            <label>
+                                Learning rate
+                                <select id="learningRate">
+                                    <option value="2e-5">2e-5 - gentle</option>
+                                    <option value="5e-5" selected>5e-5 - balanced</option>
+                                    <option value="1e-4">1e-4 - aggressive</option>
+                                </select>
+                            </label>
+                            <label>
+                                Epochs
+                                <select id="epochs">
+                                    <option value="0.5">0.5 - light pass</option>
+                                    <option value="1" selected>1 - normal</option>
+                                    <option value="2">2 - stronger fit</option>
+                                    <option value="3">3 - high memorization risk</option>
+                                </select>
+                            </label>
+                            <label>
+                                Chat context turns
+                                <select id="chatContextMax">
+                                    <option value="6">6 - compact</option>
+                                    <option value="10">10 - balanced</option>
+                                    <option value="15" selected>15 - style rich</option>
+                                    <option value="24">24 - heavy</option>
+                                </select>
+                            </label>
+                        </div>
+                        <label>
+                            Hugging Face token
+                            <input type="password" id="hfToken" placeholder="hf_... optional, used only for downloads">
+                            <span id="hfTokenStatus" class="muted"></span>
+                        </label>
+                    </div>
+                    <div class="option-stack">
+                        <label class="inline">
+                            <input type="checkbox" id="allowDownload" checked>
+                            Download selected Hugging Face model if needed
+                        </label>
+                        <label class="inline">
+                            <input type="checkbox" id="gpuTrain" checked>
+                            16 GB GPU QLoRA mode: 4-bit, rank 16, coding-first mix
+                        </label>
+                        <label class="inline">
+                            <input type="checkbox" id="quickTrain">
+                            Quick test only: 5 steps, shorter context
+                        </label>
+                    </div>
+                </div>
                 <div class="controls">
-                    <input type="file" id="codeFolder" webkitdirectory directory multiple>
                     <button id="trainButton" type="button">Train Coding Agent</button>
                     <button id="stopButton" type="button" disabled>Stop</button>
                     <button id="clearProjectButton" type="button">Clear Text Memory</button>
@@ -303,13 +760,36 @@
             </section>
 
             <aside class="panel chat-panel">
-                <div>
-                    <h2>Chat</h2>
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">Inference Bay</p>
+                        <h2>Chat</h2>
+                    </div>
                     <div id="chatStatus" class="chat-status">Coding adapter ready after training completes.</div>
                 </div>
                 <div id="chatLog" class="chat-log"></div>
                 <div class="chat-actions">
                     <textarea id="chatInput" placeholder="Ask your trained coding agent..."></textarea>
+                    <div class="advanced-grid">
+                        <label>
+                            Reply length
+                            <select id="chatMaxTokens">
+                                <option value="80">Short</option>
+                                <option value="160" selected>Normal</option>
+                                <option value="320">Long</option>
+                                <option value="512">Very long</option>
+                            </select>
+                        </label>
+                        <label>
+                            Temperature
+                            <select id="chatTemperature">
+                                <option value="0">Precise</option>
+                                <option value="0.4">Controlled</option>
+                                <option value="0.7" selected>Balanced</option>
+                                <option value="1">Creative</option>
+                            </select>
+                        </label>
+                    </div>
                     <div class="controls">
                         <button id="sendChatButton" type="button">Send</button>
                         <button id="clearChatButton" type="button">Clear</button>
@@ -320,12 +800,23 @@
     </main>
 
     <script>
-        const input = document.getElementById('codeFolder');
+        const personalityInput = document.getElementById('personalityFiles');
+        const generalInput = document.getElementById('generalFiles');
         const modelSelect = document.getElementById('modelSelect');
         const modelPath = document.getElementById('modelPath');
         const customModelLabel = document.getElementById('customModelLabel');
         const agentInstructions = document.getElementById('agentInstructions');
+        const assistantSpeakerName = document.getElementById('assistantSpeakerName');
+        const personalityWeight = document.getElementById('personalityWeight');
+        const priorityReadout = document.getElementById('priorityReadout');
+        const maxLength = document.getElementById('maxLength');
+        const loraRank = document.getElementById('loraRank');
+        const loraAlpha = document.getElementById('loraAlpha');
+        const learningRate = document.getElementById('learningRate');
+        const epochs = document.getElementById('epochs');
+        const chatContextMax = document.getElementById('chatContextMax');
         const hfToken = document.getElementById('hfToken');
+        const hfTokenStatus = document.getElementById('hfTokenStatus');
         const allowDownload = document.getElementById('allowDownload');
         const gpuTrain = document.getElementById('gpuTrain');
         const quickTrain = document.getElementById('quickTrain');
@@ -337,6 +828,8 @@
         const logEl = document.getElementById('log');
         const chatLog = document.getElementById('chatLog');
         const chatInput = document.getElementById('chatInput');
+        const chatMaxTokens = document.getElementById('chatMaxTokens');
+        const chatTemperature = document.getElementById('chatTemperature');
         const chatStatus = document.getElementById('chatStatus');
         const sendChatButton = document.getElementById('sendChatButton');
         const clearChatButton = document.getElementById('clearChatButton');
@@ -381,6 +874,7 @@
         ]);
 
         modelSelect.addEventListener('change', updateModelControls);
+        personalityWeight.addEventListener('input', updatePriorityReadout);
         trainButton.addEventListener('click', startTraining);
         stopButton.addEventListener('click', stopTraining);
         clearProjectButton.addEventListener('click', clearProjectMemory);
@@ -394,6 +888,7 @@
         });
         checkServer();
         updateModelControls();
+        updatePriorityReadout();
 
         function selectedModelPath() {
             return modelSelect.value === 'custom'
@@ -412,6 +907,11 @@
             }
         }
 
+        function updatePriorityReadout() {
+            const personality = Number(personalityWeight.value);
+            priorityReadout.textContent = `${personality} / ${100 - personality}`;
+        }
+
         async function startTraining() {
             const modelChoice = selectedModelPath();
             if (!modelChoice) {
@@ -423,29 +923,46 @@
                 return;
             }
 
-            const selectedFiles = Array.from(input.files);
-            const files = selectedFiles.filter(shouldUploadFile);
-            if (files.length === 0) {
-                statusEl.textContent = selectedFiles.length === 0
-                    ? 'Choose a folder first.'
-                    : 'No supported code files found after filtering.';
+            const selectedPersonalityFiles = Array.from(personalityInput.files);
+            const selectedGeneralFiles = Array.from(generalInput.files);
+            const personalityFiles = selectedPersonalityFiles.filter(shouldUploadFile);
+            const generalFiles = selectedGeneralFiles.filter(shouldUploadFile);
+            const totalFiles = personalityFiles.length + generalFiles.length;
+            if (totalFiles === 0) {
+                statusEl.textContent = selectedPersonalityFiles.length + selectedGeneralFiles.length === 0
+                    ? 'Choose personality files, general IQ files, or both.'
+                    : 'No supported text files found after filtering.';
                 return;
             }
 
             const formData = new FormData();
             formData.append('model_path', modelChoice);
             formData.append('agent_instructions', agentInstructions.value.trim());
+            formData.append('assistant_speaker_name', assistantSpeakerName.value.trim());
+            const personality = Number(personalityWeight.value);
+            formData.append('personality_weight', String(personality));
+            formData.append('general_weight', String(100 - personality));
+            formData.append('max_length', maxLength.value);
+            formData.append('lora_rank', loraRank.value);
+            formData.append('lora_alpha', loraAlpha.value);
+            formData.append('learning_rate', learningRate.value);
+            formData.append('epochs', epochs.value);
+            formData.append('chat_context_min', '1');
+            formData.append('chat_context_max', chatContextMax.value);
             formData.append('hf_token', hfToken.value.trim());
             formData.append('allow_model_download', allowDownload.checked ? '1' : '0');
             formData.append('gpu_train', gpuTrain.checked ? '1' : '0');
             formData.append('quick_train', quickTrain.checked ? '1' : '0');
-            for (const file of files) {
-                formData.append('files', file, file.webkitRelativePath || file.name);
+            for (const file of personalityFiles) {
+                formData.append('personality_files', file, file.webkitRelativePath || file.name);
+            }
+            for (const file of generalFiles) {
+                formData.append('general_files', file, file.webkitRelativePath || file.name);
             }
 
             trainButton.disabled = true;
             stopButton.disabled = false;
-            statusEl.textContent = `Uploading ${files.length} text files...`;
+            statusEl.textContent = `Uploading ${totalFiles} text files (${personalityFiles.length} personality, ${generalFiles.length} general)...`;
             logEl.textContent = '';
 
             try {
@@ -559,6 +1076,16 @@
                 if (!response.ok) {
                     throw new Error(`Server returned ${response.status}`);
                 }
+                const result = await readJson(response);
+                if (result.agent_instructions) {
+                    agentInstructions.value = result.agent_instructions;
+                }
+                if (result.hf_token) {
+                    hfToken.value = result.hf_token;
+                }
+                hfTokenStatus.textContent = result.has_hf_token
+                    ? `Using Hugging Face token from server env (${result.hf_token_length} chars) unless you type a different one.`
+                    : 'No server env token detected.';
                 statusEl.textContent = `Connected to ${apiBase}`;
             } catch {
                 statusEl.textContent = `Cannot reach ${apiBase}. Start the server with python app.py, then open http://127.0.0.1:5000.`;
@@ -603,7 +1130,8 @@
                     body: JSON.stringify({
                         message,
                         history: chatHistory,
-                        max_new_tokens: 320
+                        max_new_tokens: Number(chatMaxTokens.value),
+                        temperature: Number(chatTemperature.value)
                     })
                 });
                 const result = await readJson(response);
