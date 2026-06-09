@@ -147,7 +147,7 @@
 
         .workspace {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) minmax(380px, 430px);
+            grid-template-columns: minmax(0, 1fr) minmax(320px, var(--chat-width, 430px));
             gap: 24px;
             align-items: start;
             min-height: 0;
@@ -254,6 +254,52 @@
             align-items: center;
         }
 
+        .page-tabs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .page-tab {
+            min-height: 36px;
+            max-width: 180px;
+            overflow: hidden;
+            border-color: rgba(186, 213, 255, 0.18);
+            padding: 8px 11px;
+            background: rgba(186, 213, 255, 0.1);
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .page-tab.is-active {
+            border-color: rgba(94, 231, 255, 0.72);
+            color: #dff8ff;
+            background: rgba(94, 231, 255, 0.14);
+        }
+
+        .page-tab.is-last-trained::before {
+            content: "✓ ";
+            color: var(--accent);
+            font-weight: 900;
+        }
+
+        .page-tab-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: end;
+        }
+
+        .page-tab-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .page-tab-actions button {
+            flex: 1 1 130px;
+        }
+
         .value-pill {
             min-width: 64px;
             padding: 6px 9px;
@@ -267,13 +313,100 @@
         }
 
         .chat-panel {
+            position: relative;
             display: grid;
-            grid-template-rows: auto 1fr auto;
-            height: min(780px, calc(100dvh - 220px));
-            min-height: 620px;
-            overflow: hidden;
+            grid-template-rows: auto minmax(120px, 1fr) auto;
+            height: var(--chat-height, min(780px, calc(100dvh - 220px)));
+            min-height: 500px;
+            overflow: visible;
             padding: 24px;
             background: var(--panel);
+        }
+
+        .chat-panel .chat-resize-handle {
+            position: absolute;
+            z-index: 5;
+            display: block;
+            min-height: 0;
+            border: 0;
+            padding: 0;
+            color: transparent;
+            background: transparent;
+            box-shadow: none;
+            touch-action: none;
+        }
+
+        .chat-panel .chat-resize-handle::before {
+            position: absolute;
+            border-radius: 999px;
+            content: "";
+            background: rgba(186, 213, 255, 0.22);
+            transition: background 160ms ease, box-shadow 160ms ease;
+        }
+
+        .chat-panel .chat-resize-handle:hover,
+        .chat-panel .chat-resize-handle:focus-visible {
+            transform: none;
+            filter: none;
+            outline: none;
+        }
+
+        .chat-panel .chat-resize-handle:hover::before,
+        .chat-panel .chat-resize-handle:focus-visible::before,
+        .workspace.is-resizing-chat .chat-resize-handle::before {
+            background: rgba(94, 231, 255, 0.78);
+            box-shadow: 0 0 0 4px rgba(94, 231, 255, 0.12);
+        }
+
+        .chat-resize-x {
+            top: 82px;
+            bottom: 82px;
+            left: -12px;
+            width: 18px;
+            cursor: ew-resize;
+        }
+
+        .chat-resize-x::before {
+            inset: 0 7px;
+        }
+
+        .chat-resize-y {
+            right: 82px;
+            bottom: -12px;
+            left: 82px;
+            height: 18px;
+            cursor: ns-resize;
+        }
+
+        .chat-resize-y::before {
+            inset: 7px 0;
+        }
+
+        .chat-resize-both {
+            bottom: -12px;
+            left: -12px;
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            cursor: nesw-resize;
+        }
+
+        .chat-resize-both::before {
+            inset: 8px;
+            border-radius: 6px;
+            background:
+                linear-gradient(135deg, transparent 0 36%, rgba(186, 213, 255, 0.4) 37% 43%, transparent 44% 57%, rgba(186, 213, 255, 0.4) 58% 64%, transparent 65%);
+        }
+
+        .chat-resize-both:hover::before,
+        .chat-resize-both:focus-visible::before,
+        .workspace.is-resizing-chat .chat-resize-both::before {
+            background:
+                linear-gradient(135deg, transparent 0 36%, rgba(94, 231, 255, 0.95) 37% 43%, transparent 44% 57%, rgba(94, 231, 255, 0.95) 58% 64%, transparent 65%);
+        }
+
+        .workspace.is-resizing-chat {
+            user-select: none;
         }
 
         .controls {
@@ -391,6 +524,13 @@
             min-height: 64px;
             resize: vertical;
             line-height: 1.45;
+        }
+
+        #chatInput {
+            height: 104px;
+            min-height: 104px;
+            max-height: 104px;
+            resize: none;
         }
 
         input:focus,
@@ -547,11 +687,16 @@
                 grid-template-columns: 1fr;
             }
 
+            .workspace {
+                --chat-width: 100%;
+            }
+
             .option-stack {
                 grid-template-columns: 1fr;
             }
 
             .data-lanes,
+            .page-tab-row,
             .advanced-grid {
                 grid-template-columns: 1fr;
             }
@@ -571,6 +716,10 @@
             .chat-panel {
                 height: min(680px, 85dvh);
                 min-height: 520px;
+            }
+
+            .chat-resize-handle {
+                display: none;
             }
         }
 
@@ -653,6 +802,22 @@
                 </div>
                 <div class="form-grid">
                     <div class="field-stack">
+                        <div class="control-card">
+                            <h3>Page tabs</h3>
+                            <div id="pageTabs" class="page-tabs" role="tablist" aria-label="Saved page states"></div>
+                            <div class="page-tab-row">
+                                <label>
+                                    Tab name
+                                    <input type="text" id="pageTabName" placeholder="e.g. Coding run v2">
+                                </label>
+                                <button id="newPageTabButton" type="button">New</button>
+                            </div>
+                            <div class="page-tab-actions">
+                                <button id="savePageTabButton" type="button">Save Page</button>
+                                <button id="renamePageTabButton" type="button">Rename Tab</button>
+                            </div>
+                            <span id="pageTabStatus" class="muted">Tabs save this page setup and chat. Folder selections must be picked again.</span>
+                        </div>
                         <label>
                             Training model
                             <select id="modelSelect">
@@ -800,6 +965,9 @@
             </section>
 
             <aside class="panel chat-panel">
+                <button class="chat-resize-handle chat-resize-x" type="button" data-resize-axis="x" aria-label="Resize chat width"></button>
+                <button class="chat-resize-handle chat-resize-y" type="button" data-resize-axis="y" aria-label="Resize chat height"></button>
+                <button class="chat-resize-handle chat-resize-both" type="button" data-resize-axis="both" aria-label="Resize chat panel"></button>
                 <div class="panel-heading">
                     <div>
                         <p class="eyebrow">Inference Bay</p>
@@ -844,6 +1012,12 @@
         const generalInput = document.getElementById('generalFiles');
         const personalityFolderSummary = document.getElementById('personalityFolderSummary');
         const generalFolderSummary = document.getElementById('generalFolderSummary');
+        const pageTabsEl = document.getElementById('pageTabs');
+        const pageTabName = document.getElementById('pageTabName');
+        const newPageTabButton = document.getElementById('newPageTabButton');
+        const savePageTabButton = document.getElementById('savePageTabButton');
+        const renamePageTabButton = document.getElementById('renamePageTabButton');
+        const pageTabStatus = document.getElementById('pageTabStatus');
         const modelSelect = document.getElementById('modelSelect');
         const modelPath = document.getElementById('modelPath');
         const customModelLabel = document.getElementById('customModelLabel');
@@ -868,6 +1042,9 @@
         const statusEl = document.getElementById('status');
         const storageStatus = document.getElementById('storageStatus');
         const logEl = document.getElementById('log');
+        const workspace = document.querySelector('.workspace');
+        const chatPanel = document.querySelector('.chat-panel');
+        const chatResizeHandles = document.querySelectorAll('.chat-resize-handle');
         const chatLog = document.getElementById('chatLog');
         const chatInput = document.getElementById('chatInput');
         const chatMaxTokens = document.getElementById('chatMaxTokens');
@@ -910,6 +1087,9 @@
         const conversationExtensions = new Set(['.txt', '.log', '.chat', '.md', '.json', '.jsonl']);
         let pollTimer = null;
         let chatHistory = [];
+        let chatSize = loadChatSize();
+        let pageTabStore = loadPageTabs();
+        let activePageTabId = pageTabStore.activeId;
         const inferenceOnlyModels = new Set([
             'Qwen/Qwen2.5-Coder-32B-Instruct',
             'Qwen/Qwen3-Coder-30B-A3B-Instruct'
@@ -923,21 +1103,316 @@
         });
         personalityInput.addEventListener('change', () => updateFolderSummary(personalityInput, personalityFolderSummary));
         generalInput.addEventListener('change', () => updateFolderSummary(generalInput, generalFolderSummary));
+        pageTabName.addEventListener('keydown', event => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                renameActivePageTab();
+            }
+        });
+        newPageTabButton.addEventListener('click', createPageTab);
+        savePageTabButton.addEventListener('click', () => saveActivePageTab('Page saved.'));
+        renamePageTabButton.addEventListener('click', renameActivePageTab);
         personalityWeight.addEventListener('input', updatePriorityReadout);
         trainButton.addEventListener('click', startTraining);
         stopButton.addEventListener('click', stopTraining);
         clearProjectButton.addEventListener('click', clearProjectMemory);
         sendChatButton.addEventListener('click', sendChat);
         clearChatButton.addEventListener('click', clearChat);
+        chatResizeHandles.forEach(handle => {
+            handle.addEventListener('pointerdown', startChatResize);
+            handle.addEventListener('keydown', resizeChatWithKeyboard);
+        });
         chatInput.addEventListener('keydown', event => {
             if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 sendChat();
             }
         });
+        window.addEventListener('resize', () => applyChatSize(chatSize));
+        [
+            modelSelect, modelPath, agentInstructions, assistantSpeakerName, personalityWeight,
+            maxLength, loraRank, loraAlpha, learningRate, epochs, chatContextMax,
+            allowDownload, gpuTrain, quickTrain, chatMaxTokens, chatTemperature
+        ].forEach(input => {
+            input.addEventListener('input', () => saveActivePageTab());
+            input.addEventListener('change', () => saveActivePageTab());
+        });
+        renderPageTabs();
+        applyActivePageTab();
         checkServer();
         updateModelControls();
         updatePriorityReadout();
+        applyChatSize(chatSize);
+
+        function loadChatSize() {
+            return {
+                width: loadSavedNumber('chatColumnWidth', 430),
+                height: loadSavedNumber('chatPanelHeight', 620)
+            };
+        }
+
+        function loadSavedNumber(key, fallback) {
+            const savedValue = Number(localStorage.getItem(key));
+            return Number.isFinite(savedValue) && savedValue > 0 ? savedValue : fallback;
+        }
+
+        function getChatSizeBounds() {
+            const workspaceWidth = workspace.getBoundingClientRect().width;
+            const availableHeight = Math.max(500, window.innerHeight - 96);
+            return {
+                minWidth: 320,
+                maxWidth: Math.max(320, Math.min(860, workspaceWidth - 420)),
+                minHeight: 500,
+                maxHeight: Math.max(500, Math.min(1000, availableHeight))
+            };
+        }
+
+        function applyChatSize(nextSize) {
+            if (!window.matchMedia('(min-width: 1061px)').matches) {
+                chatSize = nextSize;
+                return;
+            }
+
+            const bounds = getChatSizeBounds();
+            chatSize = {
+                width: Math.min(Math.max(nextSize.width, bounds.minWidth), bounds.maxWidth),
+                height: Math.min(Math.max(nextSize.height, bounds.minHeight), bounds.maxHeight)
+            };
+            workspace.style.setProperty('--chat-width', `${chatSize.width}px`);
+            chatPanel.style.setProperty('--chat-height', `${chatSize.height}px`);
+            localStorage.setItem('chatColumnWidth', String(Math.round(chatSize.width)));
+            localStorage.setItem('chatPanelHeight', String(Math.round(chatSize.height)));
+        }
+
+        function startChatResize(event) {
+            if (!window.matchMedia('(min-width: 1061px)').matches) {
+                return;
+            }
+
+            event.preventDefault();
+            const handle = event.currentTarget;
+            const axis = handle.dataset.resizeAxis;
+            const startX = event.clientX;
+            const startY = event.clientY;
+            const startSize = { ...chatSize };
+            handle.setPointerCapture(event.pointerId);
+            workspace.classList.add('is-resizing-chat');
+
+            const handlePointerMove = moveEvent => {
+                const nextSize = { ...startSize };
+                if (axis === 'x' || axis === 'both') {
+                    nextSize.width = startSize.width + startX - moveEvent.clientX;
+                }
+                if (axis === 'y' || axis === 'both') {
+                    nextSize.height = startSize.height + moveEvent.clientY - startY;
+                }
+                applyChatSize(nextSize);
+            };
+
+            const stopResize = () => {
+                workspace.classList.remove('is-resizing-chat');
+                handle.removeEventListener('pointermove', handlePointerMove);
+                handle.removeEventListener('pointerup', stopResize);
+                handle.removeEventListener('pointercancel', stopResize);
+            };
+
+            handle.addEventListener('pointermove', handlePointerMove);
+            handle.addEventListener('pointerup', stopResize);
+            handle.addEventListener('pointercancel', stopResize);
+        }
+
+        function resizeChatWithKeyboard(event) {
+            const resizeKeys = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']);
+            if (!resizeKeys.has(event.key)) {
+                return;
+            }
+
+            event.preventDefault();
+            const axis = event.currentTarget.dataset.resizeAxis;
+            const step = event.shiftKey ? 48 : 24;
+            const nextSize = { ...chatSize };
+            if ((axis === 'x' || axis === 'both') && event.key === 'ArrowLeft') {
+                nextSize.width += step;
+            }
+            if ((axis === 'x' || axis === 'both') && event.key === 'ArrowRight') {
+                nextSize.width -= step;
+            }
+            if ((axis === 'y' || axis === 'both') && event.key === 'ArrowDown') {
+                nextSize.height += step;
+            }
+            if ((axis === 'y' || axis === 'both') && event.key === 'ArrowUp') {
+                nextSize.height -= step;
+            }
+            applyChatSize(nextSize);
+        }
+
+        function loadPageTabs() {
+            const fallback = {
+                activeId: 'tab-1',
+                lastCompletedId: '',
+                tabs: [{ id: 'tab-1', name: 'Default', completedAt: '', state: {} }]
+            };
+            try {
+                const stored = JSON.parse(localStorage.getItem('pageTabs') || '');
+                if (!stored || !Array.isArray(stored.tabs) || stored.tabs.length === 0) {
+                    return fallback;
+                }
+                return {
+                    activeId: stored.activeId || stored.tabs[0].id,
+                    lastCompletedId: stored.lastCompletedId || '',
+                    tabs: stored.tabs
+                };
+            } catch {
+                return fallback;
+            }
+        }
+
+        function persistPageTabs() {
+            localStorage.setItem('pageTabs', JSON.stringify(pageTabStore));
+        }
+
+        function activePageTab() {
+            return pageTabStore.tabs.find(tab => tab.id === activePageTabId) || pageTabStore.tabs[0];
+        }
+
+        function capturePageState() {
+            return {
+                modelSelect: modelSelect.value,
+                modelPath: modelPath.value,
+                agentInstructions: agentInstructions.value,
+                assistantSpeakerName: assistantSpeakerName.value,
+                personalityWeight: personalityWeight.value,
+                maxLength: maxLength.value,
+                loraRank: loraRank.value,
+                loraAlpha: loraAlpha.value,
+                learningRate: learningRate.value,
+                epochs: epochs.value,
+                chatContextMax: chatContextMax.value,
+                allowDownload: allowDownload.checked,
+                gpuTrain: gpuTrain.checked,
+                quickTrain: quickTrain.checked,
+                chatMaxTokens: chatMaxTokens.value,
+                chatTemperature: chatTemperature.value,
+                chatInput: chatInput.value,
+                chatHistory,
+                personalityFolderSummary: personalityFolderSummary.textContent,
+                generalFolderSummary: generalFolderSummary.textContent
+            };
+        }
+
+        function applyPageState(state = {}) {
+            modelSelect.value = state.modelSelect || modelSelect.value;
+            modelPath.value = state.modelPath || '';
+            agentInstructions.value = state.agentInstructions || '';
+            assistantSpeakerName.value = state.assistantSpeakerName || '';
+            personalityWeight.value = state.personalityWeight || '40';
+            maxLength.value = state.maxLength || '1024';
+            loraRank.value = state.loraRank || '16';
+            loraAlpha.value = state.loraAlpha || '16';
+            learningRate.value = state.learningRate || '5e-5';
+            epochs.value = state.epochs || '1';
+            chatContextMax.value = state.chatContextMax || '15';
+            allowDownload.checked = state.allowDownload ?? true;
+            gpuTrain.checked = state.gpuTrain ?? true;
+            quickTrain.checked = state.quickTrain ?? false;
+            chatMaxTokens.value = state.chatMaxTokens || '160';
+            chatTemperature.value = state.chatTemperature || '0.7';
+            chatInput.value = state.chatInput || '';
+            personalityFolderSummary.textContent = state.personalityFolderSummary || 'No folder selected';
+            generalFolderSummary.textContent = state.generalFolderSummary || 'No folder selected';
+            chatHistory = Array.isArray(state.chatHistory) ? state.chatHistory : [];
+            renderChatHistory();
+            updateModelControls();
+            updatePriorityReadout();
+        }
+
+        function renderPageTabs() {
+            pageTabsEl.textContent = '';
+            for (const tab of pageTabStore.tabs) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'page-tab';
+                button.textContent = tab.name;
+                button.setAttribute('role', 'tab');
+                button.setAttribute('aria-selected', tab.id === activePageTabId ? 'true' : 'false');
+                if (tab.id === activePageTabId) {
+                    button.classList.add('is-active');
+                }
+                if (tab.id === pageTabStore.lastCompletedId) {
+                    button.classList.add('is-last-trained');
+                    button.title = tab.completedAt ? `Last finished training: ${new Date(tab.completedAt).toLocaleString()}` : 'Last finished training';
+                }
+                button.addEventListener('click', () => switchPageTab(tab.id));
+                pageTabsEl.appendChild(button);
+            }
+        }
+
+        function applyActivePageTab() {
+            const tab = activePageTab();
+            activePageTabId = tab.id;
+            pageTabStore.activeId = tab.id;
+            pageTabName.value = tab.name;
+            applyPageState(tab.state);
+            renderPageTabs();
+            persistPageTabs();
+        }
+
+        function switchPageTab(tabId) {
+            saveActivePageTab();
+            activePageTabId = tabId;
+            applyActivePageTab();
+            pageTabStatus.textContent = `Loaded "${activePageTab().name}".`;
+        }
+
+        function saveActivePageTab(message = '') {
+            const tab = activePageTab();
+            tab.state = capturePageState();
+            pageTabStore.activeId = tab.id;
+            persistPageTabs();
+            renderPageTabs();
+            if (message) {
+                pageTabStatus.textContent = message;
+            }
+        }
+
+        function createPageTab() {
+            saveActivePageTab();
+            const nextNumber = pageTabStore.tabs.length + 1;
+            const tab = {
+                id: `tab-${Date.now()}`,
+                name: `Tab ${nextNumber}`,
+                completedAt: '',
+                state: capturePageState()
+            };
+            pageTabStore.tabs.push(tab);
+            activePageTabId = tab.id;
+            applyActivePageTab();
+            pageTabName.focus();
+            pageTabName.select();
+            pageTabStatus.textContent = 'New page tab created.';
+        }
+
+        function renameActivePageTab() {
+            const nextName = pageTabName.value.trim();
+            if (!nextName) {
+                pageTabStatus.textContent = 'Type a tab name first.';
+                return;
+            }
+            const tab = activePageTab();
+            tab.name = nextName;
+            persistPageTabs();
+            renderPageTabs();
+            pageTabStatus.textContent = `Renamed tab to "${nextName}".`;
+        }
+
+        function markActiveTabTrainingComplete() {
+            const tab = activePageTab();
+            tab.completedAt = new Date().toISOString();
+            tab.state = capturePageState();
+            pageTabStore.lastCompletedId = tab.id;
+            persistPageTabs();
+            renderPageTabs();
+        }
 
         function selectedModelPath() {
             return modelSelect.value === 'custom'
@@ -972,6 +1447,7 @@
             const folderName = firstPath.split(/[\\/]+/)[0] || 'Selected folder';
             const supportedCount = files.filter(shouldUploadFile).length;
             summaryEl.textContent = `${folderName} - ${supportedCount} supported text files`;
+            saveActivePageTab();
         }
 
         async function startTraining() {
@@ -1038,7 +1514,8 @@
                     throw new Error(result.error || 'Error starting training.');
                 }
 
-                statusEl.textContent = `Training started with ${result.files} files.`;
+                saveActivePageTab();
+                statusEl.textContent = `Training "${activePageTab().name}" started with ${result.files} files.`;
                 startPolling();
             } catch (error) {
                 statusEl.textContent = `${error.message} Server checked at ${apiBase}. Try opening http://127.0.0.1:5000 directly and choose a smaller code folder.`;
@@ -1121,6 +1598,10 @@
             statusEl.textContent = result.exit_code === 0
                 ? 'Training completed.'
                 : `Training stopped with exit code ${result.exit_code}.`;
+            if (result.exit_code === 0) {
+                markActiveTabTrainingComplete();
+                chatStatus.textContent = 'Training complete. Marked this tab as the latest finished run.';
+            }
         }
 
         async function readJson(response) {
@@ -1139,7 +1620,7 @@
                     throw new Error(`Server returned ${response.status}`);
                 }
                 const result = await readJson(response);
-                if (result.agent_instructions) {
+                if (!agentInstructions.value && result.agent_instructions) {
                     agentInstructions.value = result.agent_instructions;
                 }
                 if (result.hf_token) {
@@ -1221,6 +1702,18 @@
             item.textContent = content;
             chatLog.appendChild(item);
             chatLog.scrollTop = chatLog.scrollHeight;
+            saveActivePageTab();
+        }
+
+        function renderChatHistory() {
+            chatLog.textContent = '';
+            for (const item of chatHistory) {
+                const message = document.createElement('div');
+                message.className = `message ${item.role}`;
+                message.textContent = item.content;
+                chatLog.appendChild(message);
+            }
+            chatLog.scrollTop = chatLog.scrollHeight;
         }
 
         function clearChat() {
@@ -1228,6 +1721,7 @@
             chatLog.textContent = '';
             chatStatus.textContent = 'Ready';
             chatInput.focus();
+            saveActivePageTab();
         }
     </script>
 </body>

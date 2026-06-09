@@ -18,14 +18,30 @@ def load_env_file(path: Path, *, override: bool, protected_keys: set[str]) -> No
     if not path.exists():
         return
 
+    parsed = []
+    current_key = None
+    current_value = None
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
             continue
 
-        key, value = line.split("=", 1)
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\s*=", stripped):
+            if current_key is not None:
+                parsed.append((current_key, current_value))
+            key, value = stripped.split("=", 1)
+            current_key = key.strip()
+            current_value = value.strip().strip('"').strip("'")
+            continue
+
+        if current_key is not None:
+            current_value = f"{current_value}\n{line.rstrip()}"
+
+    if current_key is not None:
+        parsed.append((current_key, current_value))
+
+    for key, value in parsed:
         key = key.strip()
-        value = value.strip().strip('"').strip("'")
         if not key:
             continue
         protected_value = os.environ.get(key) if key in protected_keys else None
@@ -49,6 +65,8 @@ ADAPTER_DIR = STORAGE_DIR / "conversation-ai-lora"
 CHAT_CONTEXT_FILE = STORAGE_DIR / "training_data.jsonl"
 EVAL_CONTEXT_FILE = STORAGE_DIR / "eval_data.jsonl"
 AGENT_INSTRUCTIONS_FILE = STORAGE_DIR / "agent_instructions.txt"
+SAVED_MODELS_DIR = STORAGE_DIR / "saved-models"
+MODEL_REGISTRY_FILE = STORAGE_DIR / "saved_models.json"
 DEFAULT_TRAIN_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 RECOMMENDED_INFERENCE_MODEL = "Qwen/Qwen3-Coder-30B-A3B-Instruct"
 INFERENCE_ONLY_MODELS = {
@@ -73,21 +91,111 @@ XAVIER_SYSTEM_PROMPT = DEFAULT_AGENT_INSTRUCTIONS
 
 app = Flask(__name__)
 training_process = None
-chat_state = {"model": None, "tokenizer": None, "torch": None}
+chat_state = {"model": None, "tokenizer": None, "torch": None, "model_id": None, "adapter_dir": None}
 chat_lock = threading.Lock()
-context_cache = {"mtime": None, "rows": []}
+context_cache = {"path": None, "mtime": None, "rows": []}
 adapter_scale_state = {"value": None}
+
+
+def slugify_model_id(name: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", name.strip().lower()).strip("-")
+    return slug or "model"
+
+
+def unique_model_id(name: str, registry: dict | None = None) -> str:
+    registry = registry if registry is not None else load_model_registry()
+    base = slugify_model_id(name)
+    candidate = base
+    counter = 2
+    while candidate in registry:
+        candidate = f"{base}-{counter}"
+        counter += 1
+    return candidate
+
+
+def load_model_registry() -> dict:
+    if not MODEL_REGISTRY_FILE.exists():
+        return {}
+    try:
+        data = json.loads(MODEL_REGISTRY_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(key): value for key, value in data.items() if isinstance(value, dict)}
+
+
+def save_model_registry(registry: dict) -> None:
+    MODEL_REGISTRY_FILE.write_text(json.dumps(registry, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def model_slot_paths(model_id: str) -> dict[str, Path]:
+    if model_id == "current":
+        return {
+            "storage": STORAGE_DIR,
+            "uploads": UPLOAD_DIR,
+            "adapter": ADAPTER_DIR,
+            "context": CHAT_CONTEXT_FILE,
+            "eval": EVAL_CONTEXT_FILE,
+        }
+
+    storage = SAVED_MODELS_DIR / model_id
+    return {
+        "storage": storage,
+        "uploads": storage / "uploads",
+        "adapter": storage / "adapter",
+        "context": storage / "training_data.jsonl",
+        "eval": storage / "eval_data.jsonl",
+    }
+
+
+def ensure_model_block(name: str, model_id: str = "") -> dict:
+    registry = load_model_registry()
+    model_id = slugify_model_id(model_id) if model_id else unique_model_id(name or "New model", registry)
+    display_name = (name or registry.get(model_id, {}).get("name") or model_id).strip()
+    registry[model_id] = {"name": display_name}
+    save_model_registry(registry)
+    return {"id": model_id, "name": display_name, **model_slot_paths(model_id)}
+
+
+def saved_model_blocks() -> list[dict]:
+    registry = load_model_registry()
+    blocks = []
+
+    if ADAPTER_DIR.exists():
+        legacy_name = registry.get("current", {}).get("name", "Current adapter")
+        blocks.append({
+            "id": "current",
+            "name": legacy_name,
+            "ready": (ADAPTER_DIR / "adapter_config.json").exists(),
+            "adapter_dir": str(ADAPTER_DIR),
+            "context_file": str(CHAT_CONTEXT_FILE),
+        })
+
+    for model_id, item in sorted(registry.items(), key=lambda pair: pair[1].get("name", pair[0]).lower()):
+        if model_id == "current":
+            continue
+        paths = model_slot_paths(model_id)
+        blocks.append({
+            "id": model_id,
+            "name": item.get("name") or model_id,
+            "ready": (paths["adapter"] / "adapter_config.json").exists(),
+            "adapter_dir": str(paths["adapter"]),
+            "context_file": str(paths["context"]),
+        })
+
+    return blocks
 
 
 def current_agent_instructions() -> str:
     if AGENT_INSTRUCTIONS_FILE.exists():
         text = AGENT_INSTRUCTIONS_FILE.read_text(encoding="utf-8", errors="replace").strip()
         return text
-    return ""
+    return DEFAULT_AGENT_INSTRUCTIONS
 
 
 def env_agent_instructions() -> str:
-    return current_agent_instructions()
+    return os.environ.get("AGENT_INSTRUCTIONS", DEFAULT_AGENT_INSTRUCTIONS)
 
 
 def env_hf_token() -> str:
@@ -97,7 +205,7 @@ def env_hf_token() -> str:
 @app.after_request
 def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
     return response
 
@@ -117,13 +225,24 @@ def clear_memory() -> None:
         CHAT_CONTEXT_FILE.unlink()
     if EVAL_CONTEXT_FILE.exists():
         EVAL_CONTEXT_FILE.unlink()
-    context_cache.update({"mtime": None, "rows": []})
+    context_cache.update({"path": None, "mtime": None, "rows": []})
+
+
+def clear_slot_memory(paths: dict[str, Path]) -> None:
+    if paths["uploads"].exists():
+        shutil.rmtree(paths["uploads"])
+    if paths["context"].exists():
+        paths["context"].unlink()
+    if paths["eval"].exists():
+        paths["eval"].unlink()
+    context_cache.update({"path": None, "mtime": None, "rows": []})
 
 
 def unload_chat_model() -> None:
     with chat_lock:
         torch = chat_state.get("torch")
-        chat_state.update({"model": None, "tokenizer": None, "torch": None})
+        chat_state.update({"model": None, "tokenizer": None, "torch": None, "model_id": None, "adapter_dir": None})
+        adapter_scale_state["value"] = None
         if torch is not None and torch.cuda.is_available():
             torch.cuda.empty_cache()
 
@@ -140,22 +259,40 @@ def load_adapter_base_model(adapter_dir: Path) -> str:
     return base_model
 
 
-def get_chat_model():
-    if chat_state["model"] is not None and chat_state["tokenizer"] is not None:
+def get_chat_model(model_id: str, adapter_dir: Path):
+    adapter_dir = adapter_dir.resolve()
+    if (
+        chat_state["model"] is not None
+        and chat_state["tokenizer"] is not None
+        and chat_state.get("model_id") == model_id
+        and chat_state.get("adapter_dir") == str(adapter_dir)
+    ):
         return chat_state
 
     with chat_lock:
-        if chat_state["model"] is not None and chat_state["tokenizer"] is not None:
+        if (
+            chat_state["model"] is not None
+            and chat_state["tokenizer"] is not None
+            and chat_state.get("model_id") == model_id
+            and chat_state.get("adapter_dir") == str(adapter_dir)
+        ):
             return chat_state
 
-        if not ADAPTER_DIR.exists():
-            raise FileNotFoundError(f"Adapter folder does not exist: {ADAPTER_DIR}")
+        if chat_state["model"] is not None or chat_state["tokenizer"] is not None:
+            torch = chat_state.get("torch")
+            chat_state.update({"model": None, "tokenizer": None, "torch": None, "model_id": None, "adapter_dir": None})
+            adapter_scale_state["value"] = None
+            if torch is not None and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        if not adapter_dir.exists():
+            raise FileNotFoundError(f"Adapter folder does not exist: {adapter_dir}")
 
         import torch
         from peft import PeftModel
         from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-        base_model = load_adapter_base_model(ADAPTER_DIR)
+        base_model = load_adapter_base_model(adapter_dir)
         cuda_available = torch.cuda.is_available()
         bf16_available = cuda_available and torch.cuda.is_bf16_supported()
 
@@ -182,7 +319,7 @@ def get_chat_model():
             model_kwargs["torch_dtype"] = torch.bfloat16 if bf16_available else torch.float16 if cuda_available else None
 
         model = AutoModelForCausalLM.from_pretrained(base_model, **model_kwargs)
-        model = PeftModel.from_pretrained(model, ADAPTER_DIR)
+        model = PeftModel.from_pretrained(model, adapter_dir)
         model.eval()
 
         if cuda_available:
@@ -192,14 +329,20 @@ def get_chat_model():
                 if str(device) in {"cpu", "disk"}
             }
             if offloaded_devices:
-                chat_state.update({"model": None, "tokenizer": None, "torch": None})
+                chat_state.update({"model": None, "tokenizer": None, "torch": None, "model_id": None, "adapter_dir": None})
                 torch.cuda.empty_cache()
                 raise RuntimeError(
                     "The adapter base model is still being offloaded to CPU/disk, so chat would be extremely slow. "
                     "Use a smaller trained adapter/base model for chat, or keep CHAT_USE_4BIT=1 and retrain/select a model that fits in VRAM."
                 )
 
-        chat_state.update({"model": model, "tokenizer": tokenizer, "torch": torch})
+        chat_state.update({
+            "model": model,
+            "tokenizer": tokenizer,
+            "torch": torch,
+            "model_id": model_id,
+            "adapter_dir": str(adapter_dir),
+        })
         return chat_state
 
 
@@ -252,16 +395,17 @@ def set_adapter_scale(model, scale: float) -> None:
     adapter_scale_state["value"] = scale
 
 
-def load_training_context() -> list[dict[str, str]]:
-    if not CHAT_CONTEXT_FILE.exists():
+def load_training_context(context_file: Path = CHAT_CONTEXT_FILE) -> list[dict[str, str]]:
+    if not context_file.exists():
         return []
 
-    mtime = CHAT_CONTEXT_FILE.stat().st_mtime
-    if context_cache["mtime"] == mtime:
+    context_file = context_file.resolve()
+    mtime = context_file.stat().st_mtime
+    if context_cache["path"] == str(context_file) and context_cache["mtime"] == mtime:
         return context_cache["rows"]
 
     rows = []
-    with CHAT_CONTEXT_FILE.open("r", encoding="utf-8") as handle:
+    with context_file.open("r", encoding="utf-8") as handle:
         for line in handle:
             try:
                 item = json.loads(line)
@@ -270,7 +414,7 @@ def load_training_context() -> list[dict[str, str]]:
             if item.get("path") and item.get("text"):
                 rows.append({"path": item["path"], "chunk": item.get("chunk"), "text": item["text"]})
 
-    context_cache.update({"mtime": mtime, "rows": rows})
+    context_cache.update({"path": str(context_file), "mtime": mtime, "rows": rows})
     return rows
 
 
@@ -324,8 +468,8 @@ def clean_training_text(text: str) -> str:
     return code
 
 
-def retrieve_context(message: str, limit: int = 8, max_chars: int = 1200) -> tuple[str, list[str]]:
-    rows = load_training_context()
+def retrieve_context(message: str, context_file: Path = CHAT_CONTEXT_FILE, limit: int = 8, max_chars: int = 1200) -> tuple[str, list[str]]:
+    rows = load_training_context(context_file)
     if not rows:
         return "", []
 
@@ -420,6 +564,52 @@ def ping():
     })
 
 
+@app.route("/models", methods=["GET"])
+def list_models():
+    return jsonify({"models": saved_model_blocks()})
+
+
+@app.route("/models/<model_id>", methods=["PATCH"])
+def rename_model(model_id: str):
+    model_id = slugify_model_id(model_id)
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+
+    registry = load_model_registry()
+    if model_id != "current" and model_id not in registry:
+        return jsonify({"error": "Model block not found"}), 404
+
+    registry[model_id] = {"name": name}
+    save_model_registry(registry)
+    return jsonify({"model": {"id": model_id, "name": name}})
+
+
+@app.route("/models/import-current", methods=["POST"])
+def import_current_model():
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get("name") or "Current adapter").strip()
+    if not (ADAPTER_DIR / "adapter_config.json").exists():
+        return jsonify({"error": f"No current adapter found at {ADAPTER_DIR}"}), 404
+
+    model_block = ensure_model_block(name)
+    paths = model_slot_paths(model_block["id"])
+    if paths["storage"].exists():
+        shutil.rmtree(paths["storage"])
+    paths["storage"].mkdir(parents=True, exist_ok=True)
+    shutil.copytree(ADAPTER_DIR, paths["adapter"])
+    if CHAT_CONTEXT_FILE.exists():
+        shutil.copy2(CHAT_CONTEXT_FILE, paths["context"])
+    if EVAL_CONTEXT_FILE.exists():
+        shutil.copy2(EVAL_CONTEXT_FILE, paths["eval"])
+
+    return jsonify({
+        "message": f"Saved current adapter as {model_block['name']}.",
+        "model": {"id": model_block["id"], "name": model_block["name"]},
+    })
+
+
 @app.route("/clear-memory", methods=["POST"])
 def clear_memory_route():
     if training_process and training_process.poll() is None:
@@ -442,17 +632,19 @@ def chat():
     payload = request.get_json(silent=True) or {}
     message = (payload.get("message") or "").strip()
     history = payload.get("history") or []
+    model_id = slugify_model_id(payload.get("model_block_id") or "current")
+    paths = model_slot_paths(model_id)
     if not message:
         return jsonify({"error": "Message is required"}), 400
 
     try:
-        state = get_chat_model()
+        state = get_chat_model(model_id, paths["adapter"])
         model = state["model"]
         tokenizer = state["tokenizer"]
         torch = state["torch"]
         set_adapter_scale(model, float(payload.get("adapter_scale") or DEFAULT_ADAPTER_SCALE))
 
-        memory_context, sources = retrieve_context(message)
+        memory_context, sources = retrieve_context(message, paths["context"])
         messages = xavier_chat_messages(history, message, memory_context)
 
         text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -497,12 +689,21 @@ def train():
     if not any(files for _, files in file_groups):
         return jsonify({"error": "No files uploaded"}), 400
 
-    clear_memory()
-    UPLOAD_DIR.mkdir(exist_ok=True)
+    model_path = request.form.get("model_path", "").strip()
+    if model_path in INFERENCE_ONLY_MODELS:
+        return jsonify({"error": f"{model_path} is not practical for local QLoRA training on this GPU. Choose 7B, 3B, 1.5B, 0.5B, or a local custom model."}), 400
+
+    model_block_id = request.form.get("model_block_id", "").strip()
+    model_block_name = request.form.get("model_block_name", "").strip()
+    model_block = ensure_model_block(model_block_name or "New model", model_block_id) if model_block_id or model_block_name else None
+    slot_paths = model_slot_paths(model_block["id"]) if model_block else model_slot_paths("current")
+
+    clear_slot_memory(slot_paths)
+    slot_paths["uploads"].mkdir(parents=True, exist_ok=True)
     saved_count = 0
 
     for group_name, files in file_groups:
-        group_dir = UPLOAD_DIR / group_name
+        group_dir = slot_paths["uploads"] / group_name
         for uploaded_file in files:
             if not uploaded_file.filename:
                 continue
@@ -518,7 +719,7 @@ def train():
     unload_chat_model()
 
     child_env = os.environ.copy()
-    child_env["TRAIN_STORAGE_DIR"] = str(STORAGE_DIR)
+    child_env["TRAIN_STORAGE_DIR"] = str(slot_paths["storage"])
     agent_instructions = request.form.get("agent_instructions", "").strip()
     AGENT_INSTRUCTIONS_FILE.write_text(agent_instructions, encoding="utf-8")
     child_env["AGENT_INSTRUCTIONS"] = agent_instructions
@@ -539,9 +740,6 @@ def train():
     elif child_env.get("HUGGING_FACE_HUB_TOKEN"):
         child_env["HF_TOKEN"] = child_env["HUGGING_FACE_HUB_TOKEN"]
 
-    model_path = request.form.get("model_path", "").strip()
-    if model_path in INFERENCE_ONLY_MODELS:
-        return jsonify({"error": f"{model_path} is not practical for local QLoRA training on this GPU. Choose 7B, 3B, 1.5B, 0.5B, or a local custom model."}), 400
     if model_path:
         child_env["QWEN_MODEL_PATH"] = model_path
         if request.form.get("allow_model_download") == "1" and "/" in model_path:
@@ -549,7 +747,7 @@ def train():
     elif request.form.get("allow_model_download") == "1":
         child_env["QWEN_MODEL_PATH"] = DEFAULT_TRAIN_MODEL
         child_env["ALLOW_MODEL_DOWNLOAD"] = "1"
-    child_env.setdefault("TRAIN_OUTPUT_DIR", str(ADAPTER_DIR))
+    child_env["TRAIN_OUTPUT_DIR"] = str(slot_paths["adapter"])
 
     child_env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     child_env.setdefault("HF_HUB_DISABLE_XET", "1")
@@ -597,7 +795,10 @@ def train():
     )
     log_handle.close()
 
-    return jsonify({"message": "Training started", "files": saved_count})
+    response_payload = {"message": "Training started", "files": saved_count}
+    if model_block:
+        response_payload["model_block"] = {"id": model_block["id"], "name": model_block["name"]}
+    return jsonify(response_payload)
 
 
 @app.route("/stop", methods=["POST"])
