@@ -3,1587 +3,563 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Local Qwen Coder Agent Trainer</title>
+    <title>AI Training Control</title>
     <style>
         :root {
             color-scheme: dark;
-            --bg: #06152d;
-            --ink: #f8fbff;
-            --muted: #a9bad4;
-            --panel: rgba(10, 27, 55, 0.82);
-            --panel-soft: rgba(17, 42, 78, 0.68);
-            --line: rgba(186, 213, 255, 0.18);
-            --field: rgba(4, 15, 34, 0.76);
-            --accent: #5ee7ff;
-            --accent-strong: #3b82f6;
-            --shadow: 0 12px 34px rgba(0, 10, 28, 0.24);
+            --bg: #101318;
+            --panel: #171b22;
+            --panel-2: #1f2530;
+            --field: #0d1015;
+            --line: #333b48;
+            --text: #f4f7fb;
+            --muted: #9da7b7;
+            --accent: #38bdf8;
+            --accent-2: #22c55e;
+            --danger: #ef4444;
         }
 
-        * {
-            box-sizing: border-box;
-        }
-
-        html,
-        body {
-            min-height: 100%;
-        }
-
+        * { box-sizing: border-box; }
         body {
             margin: 0;
+            background: var(--bg);
+            color: var(--text);
             font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            color: var(--ink);
-            background: #071832;
-        }
-
-        body::before {
-            position: fixed;
-            inset: 0;
-            z-index: -1;
-            pointer-events: none;
-            content: "";
-            opacity: 0.22;
-            background-image:
-                linear-gradient(rgba(186, 213, 255, 0.055) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(186, 213, 255, 0.055) 1px, transparent 1px);
-            background-size: 72px 72px;
-            mask-image: linear-gradient(to bottom, #000, transparent 82%);
         }
 
         main {
-            display: grid;
-            grid-template-rows: auto auto;
-            width: min(1360px, 100%);
-            min-height: 100dvh;
+            width: min(1480px, 100%);
             margin: 0 auto;
-            padding: 30px;
-            gap: 24px;
+            padding: 20px;
         }
 
-        .topbar {
+        header {
             display: grid;
             grid-template-columns: minmax(0, 1fr) auto;
+            gap: 16px;
             align-items: end;
-            gap: 28px;
-            padding: 26px 28px;
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            background: rgba(9, 31, 63, 0.94);
-            box-shadow: var(--shadow);
-        }
-
-        .brand-mark {
-            display: inline-grid;
-            place-items: center;
-            width: 40px;
-            height: 40px;
-            border: 1px solid rgba(94, 231, 255, 0.42);
-            border-radius: 8px;
-            color: #dff8ff;
-            background: #123b73;
-            font-weight: 900;
-            letter-spacing: 0;
-        }
-
-        .title-row {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            min-width: 0;
-        }
-
-        h1,
-        h2 {
-            margin: 0;
-            letter-spacing: 0;
-        }
-
-        h1 {
-            font-size: clamp(28px, 3.2vw, 46px);
-            line-height: 1.04;
-        }
-
-        h2 {
-            font-size: 20px;
-            line-height: 1.2;
-        }
-
-        .intro {
-            max-width: 820px;
-            margin: 14px 0 0 52px;
-            color: var(--muted);
-            line-height: 1.65;
-        }
-
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(106px, 1fr));
-            gap: 12px;
-            min-width: 360px;
-        }
-
-        .stat {
-            min-height: 64px;
-            padding: 13px 14px;
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.065);
-        }
-
-        .stat span {
-            display: block;
-            color: var(--muted);
-            font-size: 11px;
-            font-weight: 800;
-            text-transform: uppercase;
-        }
-
-        .stat strong {
-            display: block;
-            margin-top: 6px;
-            color: var(--ink);
-            font-size: 18px;
-            line-height: 1.1;
-        }
-
-        .workspace {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) minmax(320px, var(--chat-width, 430px));
-            gap: 24px;
-            align-items: start;
-            min-height: 0;
-            min-width: 0;
-        }
-
-        .panel {
-            min-width: 0;
-            min-height: 0;
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            background: var(--panel);
-            box-shadow: var(--shadow);
-            backdrop-filter: blur(18px);
-        }
-
-        .panel-heading {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 18px;
-            padding-bottom: 18px;
+            margin-bottom: 16px;
+            padding-bottom: 14px;
             border-bottom: 1px solid var(--line);
         }
 
-        .eyebrow {
-            margin: 0 0 4px;
-            color: var(--accent);
-            font-size: 11px;
-            font-weight: 900;
-            text-transform: uppercase;
-        }
+        h1, h2, h3, p { margin: 0; }
+        h1 { font-size: clamp(26px, 3vw, 42px); line-height: 1.05; }
+        h2 { font-size: 18px; }
+        h3 { font-size: 14px; color: var(--muted); text-transform: uppercase; }
+        p { color: var(--muted); line-height: 1.5; }
 
-        .status-pill {
-            display: inline-flex;
-            align-items: center;
-            min-height: 30px;
-            padding: 6px 10px;
-            border: 1px solid rgba(94, 231, 255, 0.3);
-            border-radius: 999px;
-            color: #c7f7ff;
-            background: rgba(94, 231, 255, 0.1);
-            font-size: 12px;
-            font-weight: 800;
-            white-space: nowrap;
-        }
-
-        .trainer-panel {
-            display: flex;
-            flex-direction: column;
-            gap: 22px;
-            overflow: visible;
-            padding: 24px;
-        }
-
-        .form-grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 18px;
-        }
-
-        .field-stack {
-            display: grid;
-            gap: 18px;
-            align-content: start;
-            min-width: 0;
-        }
-
-        .option-stack {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 12px;
-            align-content: start;
-        }
-
-        .data-lanes,
-        .advanced-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 14px;
-        }
-
-        .lane-card,
-        .control-card {
-            display: grid;
-            gap: 12px;
-            padding: 15px;
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            background: var(--panel-soft);
-        }
-
-        .lane-card h3,
-        .control-card h3 {
-            margin: 0;
-            font-size: 15px;
-            letter-spacing: 0;
-        }
-
-        .slider-row {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            gap: 12px;
-            align-items: center;
-        }
-
-        .page-tabs {
+        .status-bar {
             display: flex;
             flex-wrap: wrap;
             gap: 8px;
+            justify-content: flex-end;
         }
 
-        .page-tab {
-            min-height: 36px;
-            max-width: 180px;
-            overflow: hidden;
-            border-color: rgba(186, 213, 255, 0.18);
-            padding: 8px 11px;
-            background: rgba(186, 213, 255, 0.1);
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .page-tab.is-active {
-            border-color: rgba(94, 231, 255, 0.72);
-            color: #dff8ff;
-            background: rgba(94, 231, 255, 0.14);
-        }
-
-        .page-tab.is-last-trained::before {
-            content: "✓ ";
-            color: var(--accent);
-            font-weight: 900;
-        }
-
-        .page-tab-row {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            gap: 10px;
-            align-items: end;
-        }
-
-        .page-tab-actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-
-        .page-tab-actions button {
-            flex: 1 1 130px;
-        }
-
-        .value-pill {
-            min-width: 64px;
-            padding: 6px 9px;
-            border: 1px solid rgba(94, 231, 255, 0.26);
-            border-radius: 999px;
-            color: #d7f8ff;
-            background: rgba(94, 231, 255, 0.09);
+        .pill {
+            min-height: 32px;
+            padding: 7px 10px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel);
+            color: var(--muted);
             font-size: 12px;
-            font-weight: 900;
-            text-align: center;
+            font-weight: 800;
         }
 
-        .chat-panel {
-            position: relative;
+        .layout {
             display: grid;
-            grid-template-rows: auto minmax(120px, 1fr) auto;
-            height: var(--chat-height, min(780px, calc(100dvh - 220px)));
-            min-height: 500px;
-            overflow: visible;
-            padding: 24px;
+            grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
+            gap: 16px;
+            align-items: start;
+        }
+
+        form, .chat, .log-panel {
+            border: 1px solid var(--line);
+            border-radius: 8px;
             background: var(--panel);
         }
 
-        .chat-panel .chat-resize-handle {
-            position: absolute;
-            z-index: 5;
-            display: block;
-            min-height: 0;
-            border: 0;
-            padding: 0;
-            color: transparent;
-            background: transparent;
-            box-shadow: none;
-            touch-action: none;
+        form {
+            display: grid;
+            gap: 16px;
+            padding: 16px;
         }
 
-        .chat-panel .chat-resize-handle::before {
-            position: absolute;
-            border-radius: 999px;
-            content: "";
-            background: rgba(186, 213, 255, 0.22);
-            transition: background 160ms ease, box-shadow 160ms ease;
-        }
-
-        .chat-panel .chat-resize-handle:hover,
-        .chat-panel .chat-resize-handle:focus-visible {
-            transform: none;
-            filter: none;
-            outline: none;
-        }
-
-        .chat-panel .chat-resize-handle:hover::before,
-        .chat-panel .chat-resize-handle:focus-visible::before,
-        .workspace.is-resizing-chat .chat-resize-handle::before {
-            background: rgba(94, 231, 255, 0.78);
-            box-shadow: 0 0 0 4px rgba(94, 231, 255, 0.12);
-        }
-
-        .chat-resize-x {
-            top: 82px;
-            bottom: 82px;
-            left: -12px;
-            width: 18px;
-            cursor: ew-resize;
-        }
-
-        .chat-resize-x::before {
-            inset: 0 7px;
-        }
-
-        .chat-resize-y {
-            right: 82px;
-            bottom: -12px;
-            left: 82px;
-            height: 18px;
-            cursor: ns-resize;
-        }
-
-        .chat-resize-y::before {
-            inset: 7px 0;
-        }
-
-        .chat-resize-both {
-            bottom: -12px;
-            left: -12px;
-            width: 30px;
-            height: 30px;
-            border-radius: 8px;
-            cursor: nesw-resize;
-        }
-
-        .chat-resize-both::before {
-            inset: 8px;
-            border-radius: 6px;
-            background:
-                linear-gradient(135deg, transparent 0 36%, rgba(186, 213, 255, 0.4) 37% 43%, transparent 44% 57%, rgba(186, 213, 255, 0.4) 58% 64%, transparent 65%);
-        }
-
-        .chat-resize-both:hover::before,
-        .chat-resize-both:focus-visible::before,
-        .workspace.is-resizing-chat .chat-resize-both::before {
-            background:
-                linear-gradient(135deg, transparent 0 36%, rgba(94, 231, 255, 0.95) 37% 43%, transparent 44% 57%, rgba(94, 231, 255, 0.95) 58% 64%, transparent 65%);
-        }
-
-        .workspace.is-resizing-chat {
-            user-select: none;
-        }
-
-        .controls {
-            display: flex;
-            flex-wrap: wrap;
+        section {
+            display: grid;
             gap: 12px;
-            align-items: center;
+            padding: 14px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel-2);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .grid-3 {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
         }
 
         label {
             display: grid;
-            gap: 9px;
-            width: 100%;
-            color: #edf5ff;
+            gap: 7px;
+            color: #e8edf5;
             font-size: 13px;
-            font-weight: 850;
+            font-weight: 750;
+            min-width: 0;
         }
 
-        .inline {
-            display: flex;
-            align-items: flex-start;
-            width: auto;
-            gap: 11px;
-            min-height: 74px;
-            padding: 14px;
+        input, select, textarea, button {
+            font: inherit;
+        }
+
+        input[type="text"], input[type="password"], input[type="number"], select, textarea {
+            width: 100%;
+            min-height: 42px;
             border: 1px solid var(--line);
             border-radius: 8px;
-            color: #deebff;
-            background: var(--panel-soft);
-            line-height: 1.35;
-        }
-
-        input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-            margin: 0;
-            accent-color: var(--accent-strong);
-            flex: 0 0 auto;
-        }
-
-        input[type="file"] {
-            width: min(100%, 420px);
-            min-height: 44px;
-            color: var(--muted);
-            font: inherit;
-            font-size: 13px;
-        }
-
-        input[type="range"] {
-            width: 100%;
-            accent-color: var(--accent);
-        }
-
-        input[type="number"] {
-            appearance: textfield;
-        }
-
-        input[type="file"]::file-selector-button {
-            margin-right: 10px;
-            border: 1px solid rgba(255, 255, 255, 0.16);
-            border-radius: 6px;
-            padding: 8px 10px;
-            color: var(--ink);
-            background: rgba(186, 213, 255, 0.12);
-            cursor: pointer;
-            font-weight: 800;
-        }
-
-        .folder-picker {
-            display: grid;
-            grid-template-columns: auto minmax(0, 1fr);
-            gap: 10px 12px;
-            align-items: center;
-        }
-
-        .folder-input {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            overflow: hidden;
-            clip: rect(0 0 0 0);
-            clip-path: inset(50%);
-            white-space: nowrap;
-        }
-
-        .folder-summary {
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        input[type="text"],
-        input[type="password"],
-        select,
-        textarea {
-            width: 100%;
-            border: 1px solid rgba(186, 213, 255, 0.22);
-            border-radius: 8px;
-            padding: 13px 14px;
-            color: var(--ink);
+            padding: 10px 11px;
             background: var(--field);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-            font: inherit;
+            color: var(--text);
             outline: none;
-            transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
-        }
-
-        select {
-            color: #f8fbf9;
         }
 
         textarea {
-            height: 118px;
-            min-height: 64px;
+            min-height: 104px;
             resize: vertical;
             line-height: 1.45;
         }
 
-        #chatInput {
-            height: 104px;
-            min-height: 104px;
-            max-height: 104px;
-            resize: none;
+        input[type="file"] {
+            width: 100%;
+            min-height: 42px;
+            color: var(--muted);
         }
 
-        input:focus,
-        select:focus,
-        textarea:focus {
-            border-color: rgba(94, 231, 255, 0.8);
-            box-shadow: 0 0 0 3px rgba(94, 231, 255, 0.16);
+        input[type="file"]::file-selector-button {
+            min-height: 36px;
+            margin-right: 10px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: #2b3442;
+            color: var(--text);
+            cursor: pointer;
         }
 
-        ::placeholder {
-            color: #7790b2;
+        input:focus, select:focus, textarea:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14);
+        }
+
+        .toggle-row {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .check {
+            display: flex;
+            align-items: flex-start;
+            gap: 9px;
+            min-height: 54px;
+            padding: 10px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--field);
+            color: var(--text);
+        }
+
+        .check input {
+            width: 18px;
+            height: 18px;
+            margin: 1px 0 0;
+            accent-color: var(--accent);
+        }
+
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
         }
 
         button {
-            min-height: 44px;
-            border: 1px solid rgba(255, 255, 255, 0.12);
+            min-height: 42px;
+            border: 1px solid transparent;
             border-radius: 8px;
-            padding: 10px 16px;
-            color: #f8fbff;
+            padding: 9px 14px;
             background: #2563eb;
-            box-shadow: none;
+            color: white;
             cursor: pointer;
-            font: inherit;
             font-size: 13px;
             font-weight: 900;
-            transition: transform 150ms ease, filter 150ms ease, opacity 150ms ease;
         }
 
-        button:hover:not(:disabled) {
-            transform: translateY(-1px);
-            filter: brightness(1.05);
+        button.secondary { background: #2b3442; border-color: var(--line); }
+        button.good { background: #15803d; }
+        button.danger { background: var(--danger); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .side {
+            display: grid;
+            gap: 16px;
         }
 
-        button:disabled {
-            opacity: 0.48;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        #stopButton {
-            color: #fff7f8;
-            background: #e11d48;
-            box-shadow: none;
-        }
-
-        #clearProjectButton,
-        #clearChatButton {
-            color: var(--ink);
-            background: rgba(186, 213, 255, 0.12);
-            box-shadow: none;
-        }
-
-        #status {
-            min-height: 48px;
-            padding: 13px 15px;
-            border: 1px solid rgba(94, 231, 255, 0.26);
-            border-radius: 8px;
-            color: #d7f8ff;
-            background: rgba(94, 231, 255, 0.09);
-            font-weight: 850;
-            line-height: 1.35;
-        }
-
-        #storageStatus {
-            min-height: 18px;
-        }
-
-        pre {
-            flex: 1;
-            min-height: 280px;
-            max-height: 440px;
-            overflow: auto;
-            margin: 0;
-            padding: 18px;
-            border: 1px solid rgba(186, 213, 255, 0.16);
-            border-radius: 8px;
-            color: #d8ecff;
-            background: #030b18;
-            white-space: pre-wrap;
-            overflow-wrap: anywhere;
-            word-break: break-word;
-            font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
-            font-size: 12px;
-            line-height: 1.55;
+        .chat {
+            display: grid;
+            grid-template-rows: auto minmax(220px, 1fr) auto;
+            height: min(760px, calc(100dvh - 40px));
+            padding: 14px;
         }
 
         .chat-log {
             display: grid;
             align-content: start;
-            gap: 12px;
-            min-width: 0;
-            min-height: 0;
-            margin: 18px 0;
+            gap: 10px;
             overflow: auto;
-            padding: 4px 4px 4px 0;
+            margin: 12px 0;
+            padding-right: 4px;
         }
 
         .message {
-            min-width: 0;
             max-width: 92%;
-            padding: 12px 14px;
+            padding: 10px 12px;
             border: 1px solid var(--line);
             border-radius: 8px;
             white-space: pre-wrap;
             overflow-wrap: anywhere;
-            word-break: break-word;
-            line-height: 1.42;
+            line-height: 1.4;
             font-size: 14px;
         }
 
-        .message.user {
-            justify-self: end;
-            color: #f8fbff;
-            background: #2563eb;
-        }
+        .message.user { justify-self: end; background: #2563eb; }
+        .message.assistant { justify-self: start; background: var(--panel-2); }
 
-        .message.assistant {
-            justify-self: start;
-            color: #eef6ff;
-            background: rgba(186, 213, 255, 0.1);
-        }
-
-        .chat-actions {
+        .chat-controls {
             display: grid;
-            gap: 12px;
-            min-width: 0;
+            gap: 10px;
         }
 
-        .chat-status {
-            min-height: 20px;
-            margin-top: 7px;
-            color: var(--muted);
-            font-size: 13px;
-            line-height: 1.35;
-            text-align: right;
+        .log-panel {
+            display: grid;
+            gap: 10px;
+            padding: 14px;
         }
 
-        .muted {
+        pre {
+            min-height: 260px;
+            max-height: 460px;
+            overflow: auto;
+            margin: 0;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 12px;
+            background: #05070a;
+            color: #dbeafe;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            font-family: "Cascadia Code", Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .small {
             color: var(--muted);
             font-size: 12px;
-            font-weight: 500;
             line-height: 1.4;
         }
 
-        @media (max-width: 1060px) {
-            main {
-                height: auto;
-                min-height: 100dvh;
-                overflow: visible;
-            }
-
-            .topbar,
-            .workspace {
-                grid-template-columns: 1fr;
-            }
-
-            .workspace {
-                --chat-width: 100%;
-            }
-
-            .option-stack {
-                grid-template-columns: 1fr;
-            }
-
-            .data-lanes,
-            .page-tab-row,
-            .advanced-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .stats {
-                min-width: 0;
-            }
-
-            .intro {
-                margin-left: 0;
-            }
-
-            .trainer-panel {
-                min-height: 0;
-            }
-
-            .chat-panel {
-                height: min(680px, 85dvh);
-                min-height: 520px;
-            }
-
-            .chat-resize-handle {
-                display: none;
-            }
+        @media (max-width: 1080px) {
+            header, .layout, .grid, .grid-3, .toggle-row { grid-template-columns: 1fr; }
+            .status-bar { justify-content: flex-start; }
+            .chat { height: 640px; }
         }
 
         @media (max-width: 620px) {
-            main {
-                padding: 12px;
-            }
-
-            .topbar,
-            .trainer-panel,
-            .chat-panel {
-                padding: 13px;
-            }
-
-            .title-row {
-                align-items: flex-start;
-            }
-
-            .stats {
-                grid-template-columns: 1fr;
-            }
-
-            .panel-heading {
-                align-items: flex-start;
-                flex-direction: column;
-            }
-
-            .chat-status {
-                text-align: left;
-            }
-
-            .status-pill {
-                white-space: normal;
-            }
-
-            .folder-picker {
-                grid-template-columns: 1fr;
-            }
-
-            .folder-summary {
-                white-space: normal;
-            }
+            main { padding: 10px; }
+            form, section, .chat, .log-panel { padding: 10px; }
         }
     </style>
 </head>
 <body>
-    <main>
-        <header class="topbar">
-            <div>
-                <div class="title-row">
-                    <div class="brand-mark" aria-hidden="true">Q</div>
-                    <h1>Local Qwen Coder Agent Trainer</h1>
-                </div>
-                <p class="intro">Train a QLoRA style adapter for a local coding agent. Default: Qwen2.5-Coder-7B for reliable local training; use 14B later if the large download behaves.</p>
-            </div>
-            <div class="stats" aria-label="Training setup highlights">
-                <div class="stat">
-                    <span>Mode</span>
-                    <strong>QLoRA</strong>
-                </div>
-                <div class="stat">
-                    <span>Target</span>
-                    <strong>16 GB GPU</strong>
-                </div>
-                <div class="stat">
-                    <span>Flow</span>
-                    <strong>Train + Chat</strong>
-                </div>
-            </div>
-        </header>
+<main>
+    <header>
+        <div>
+            <h1>AI Training Control</h1>
+            <p>One page. Uploaded files and these controls are what the training run uses.</p>
+        </div>
+        <div class="status-bar">
+            <span class="pill" id="serverPill">Server: checking</span>
+            <span class="pill" id="adapterPill">Adapter: unknown</span>
+            <span class="pill" id="storagePill">Storage: unknown</span>
+        </div>
+    </header>
 
-        <div class="workspace">
-            <section class="panel trainer-panel">
-                <div class="panel-heading">
-                    <div>
-                        <p class="eyebrow">Trainer Console</p>
-                        <h2>Adapter build</h2>
-                    </div>
-                    <div class="status-pill">Local first</div>
-                </div>
-                <div class="form-grid">
-                    <div class="field-stack">
-                        <div class="control-card">
-                            <h3>Page tabs</h3>
-                            <div id="pageTabs" class="page-tabs" role="tablist" aria-label="Saved page states"></div>
-                            <div class="page-tab-row">
-                                <label>
-                                    Tab name
-                                    <input type="text" id="pageTabName" placeholder="e.g. Coding run v2">
-                                </label>
-                                <button id="newPageTabButton" type="button">New</button>
-                            </div>
-                            <div class="page-tab-actions">
-                                <button id="savePageTabButton" type="button">Save Page</button>
-                                <button id="renamePageTabButton" type="button">Rename Tab</button>
-                            </div>
-                            <span id="pageTabStatus" class="muted">Tabs save this page setup and chat. Folder selections must be picked again.</span>
-                        </div>
+    <div class="layout">
+        <div>
+            <form id="trainForm">
+                <section>
+                    <h2>Training Data</h2>
+                    <label>
+                        Files or folder
+                        <input id="files" name="files" type="file" multiple webkitdirectory>
+                    </label>
+                    <div class="grid grid-3">
                         <label>
-                            Training model
-                            <select id="modelSelect">
-                                <option value="Qwen/Qwen2.5-3B-Instruct" selected>Qwen2.5 3B Instruct - cached, train now</option>
-                                <option value="Qwen/Qwen2.5-Coder-7B-Instruct">Qwen2.5-Coder 7B Instruct - best practical coder if download works</option>
-                                <option value="Qwen/Qwen2.5-Coder-3B-Instruct">Qwen2.5-Coder 3B Instruct - fast test</option>
-                                <option value="Qwen/Qwen2.5-Coder-1.5B-Instruct">Qwen2.5-Coder 1.5B Instruct - very fast test</option>
-                                <option value="Qwen/Qwen2.5-Coder-0.5B-Instruct">Qwen2.5-Coder 0.5B Instruct - smoke test</option>
-                                <option value="Qwen/Qwen2.5-Coder-14B-Instruct">Qwen2.5-Coder 14B Instruct - ambitious download</option>
-                                <option value="Qwen/Qwen2.5-Coder-32B-Instruct">Qwen2.5-Coder 32B Instruct - inference only here</option>
-                                <option value="Qwen/Qwen3-Coder-30B-A3B-Instruct">Qwen3-Coder 30B-A3B - inference only here</option>
-                                <option value="custom">Custom local folder or HF repo</option>
+                            Data mode
+                            <select name="data_mode" id="dataMode">
+                                <option value="auto">Auto: chat + context</option>
+                                <option value="chat">Chat replies only</option>
+                                <option value="context">Raw context chunks only</option>
                             </select>
-                            <span class="muted">Use the cached 3B option to train immediately. 30B/32B are listed for reference and are not practical QLoRA targets here.</span>
-                        </label>
-                        <label id="customModelLabel" hidden>
-                            Custom model path or repo
-                            <input type="text" id="modelPath" placeholder="C:\models\Qwen2.5-Coder-7B-Instruct or Qwen/...">
-                        </label>
-                        <label>
-                            Agent instructions
-                            <textarea id="agentInstructions" placeholder="Optional. Leave blank for no system/persona instructions."></textarea>
-                            <span class="muted">This is the only system instruction sent to training and chat. Blank means blank.</span>
                         </label>
                         <label>
                             Assistant speaker name
-                            <input type="text" id="assistantSpeakerName" placeholder="Optional, e.g. your name in WhatsApp logs">
-                            <span class="muted">Used only to parse plain text chat logs. JSON roles like assistant/user do not need this.</span>
+                            <input name="assistant_speaker_name" type="text" placeholder="Name in chats, optional">
                         </label>
-                        <div class="data-lanes">
-                            <div class="lane-card">
-                                <h3>Personality data</h3>
-                                <span class="muted">Chats, messages, tone samples, phrasing, humor, habits, and style examples.</span>
-                                <div class="folder-picker">
-                                    <input type="file" id="personalityFiles" class="folder-input" webkitdirectory directory multiple aria-label="Choose personality data folder">
-                                    <button type="button" class="folder-button" data-picker-target="personalityFiles">Choose Folder</button>
-                                    <span id="personalityFolderSummary" class="muted folder-summary">No folder selected</span>
-                                </div>
-                            </div>
-                            <div class="lane-card">
-                                <h3>General IQ data</h3>
-                                <span class="muted">Code, notes, docs, Q&A, facts, reasoning examples, and practical knowledge.</span>
-                                <div class="folder-picker">
-                                    <input type="file" id="generalFiles" class="folder-input" webkitdirectory directory multiple aria-label="Choose general IQ data folder">
-                                    <button type="button" class="folder-button" data-picker-target="generalFiles">Choose Folder</button>
-                                    <span id="generalFolderSummary" class="muted folder-summary">No folder selected</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="control-card">
-                            <h3>Training priority</h3>
-                            <label>
-                                Personality influence
-                                <div class="slider-row">
-                                    <input type="range" id="personalityWeight" min="0" max="100" value="40">
-                                    <span id="priorityReadout" class="value-pill">40 / 60</span>
-                                </div>
-                                <span class="muted">Higher personality repeats style rows more. Lower personality gives more weight to general IQ data.</span>
-                            </label>
-                        </div>
-                        <div class="advanced-grid">
-                            <label>
-                                Context length
-                                <select id="maxLength">
-                                    <option value="512">512 - safest</option>
-                                    <option value="1024" selected>1024 - balanced</option>
-                                    <option value="1536">1536 - more context</option>
-                                    <option value="2048">2048 - heavier</option>
-                                </select>
-                            </label>
-                            <label>
-                                LoRA rank
-                                <select id="loraRank">
-                                    <option value="4">4 - tiny test</option>
-                                    <option value="8">8 - light</option>
-                                    <option value="16" selected>16 - balanced</option>
-                                    <option value="32">32 - stronger</option>
-                                </select>
-                            </label>
-                            <label>
-                                LoRA alpha
-                                <select id="loraAlpha">
-                                    <option value="8">8</option>
-                                    <option value="16" selected>16</option>
-                                    <option value="32">32</option>
-                                    <option value="64">64</option>
-                                </select>
-                            </label>
-                            <label>
-                                Learning rate
-                                <select id="learningRate">
-                                    <option value="2e-5">2e-5 - gentle</option>
-                                    <option value="5e-5" selected>5e-5 - balanced</option>
-                                    <option value="1e-4">1e-4 - aggressive</option>
-                                </select>
-                            </label>
-                            <label>
-                                Epochs
-                                <select id="epochs">
-                                    <option value="0.5">0.5 - light pass</option>
-                                    <option value="1" selected>1 - normal</option>
-                                    <option value="2">2 - stronger fit</option>
-                                    <option value="3">3 - high memorization risk</option>
-                                </select>
-                            </label>
-                            <label>
-                                Chat context turns
-                                <select id="chatContextMax">
-                                    <option value="6">6 - compact</option>
-                                    <option value="10">10 - balanced</option>
-                                    <option value="15" selected>15 - style rich</option>
-                                    <option value="24">24 - heavy</option>
-                                </select>
-                            </label>
-                        </div>
+                        <label>
+                            Dataset seed
+                            <input name="dataset_seed" type="number" value="42">
+                        </label>
+                    </div>
+                    <label>
+                        System prompt / behavior instructions
+                        <textarea id="agentInstructions" name="agent_instructions" placeholder="Leave blank for no injected system prompt."></textarea>
+                    </label>
+                    <div class="toggle-row">
+                        <label class="check"><input name="filter_low_value_replies" type="checkbox" checked> Filter empty, deleted, link-only, and junk replies</label>
+                        <label class="check"><input name="keep_short_replies" type="checkbox" checked> Keep useful short replies with enough context</label>
+                        <label class="check"><input name="allow_model_download" type="checkbox" checked> Allow Hugging Face download</label>
+                    </div>
+                </section>
+
+                <section>
+                    <h2>Model</h2>
+                    <div class="grid">
+                        <label>
+                            Base model or local folder
+                            <input name="model_path" type="text" value="Qwen/Qwen2.5-3B-Instruct">
+                        </label>
                         <label>
                             Hugging Face token
-                            <input type="password" id="hfToken" placeholder="hf_... optional, used only for downloads">
-                            <span id="hfTokenStatus" class="muted"></span>
+                            <input id="hfToken" name="hf_token" type="password" placeholder="Optional">
+                            <span class="small" id="hfTokenStatus">No env token loaded yet.</span>
                         </label>
                     </div>
-                    <div class="option-stack">
-                        <label class="inline">
-                            <input type="checkbox" id="allowDownload" checked>
-                            Download selected Hugging Face model if needed
+                </section>
+
+                <section>
+                    <h2>Dataset Shape</h2>
+                    <div class="grid grid-3">
+                        <label>Max file bytes <input name="max_file_bytes" type="number" value="200000"></label>
+                        <label>Max chat file bytes <input name="max_conversation_bytes" type="number" value="5242880"></label>
+                        <label>Eval ratio <input name="eval_ratio" type="text" value="0.08"></label>
+                        <label>Chunk chars <input name="chunk_chars" type="number" value="3500"></label>
+                        <label>Chunk overlap <input name="chunk_overlap" type="number" value="500"></label>
+                        <label>Max sequence length <input name="max_length" type="number" value="1024"></label>
+                        <label>Min chat context <input name="chat_context_min" type="number" value="1"></label>
+                        <label>Max chat context <input name="chat_context_max" type="number" value="15"></label>
+                    </div>
+                </section>
+
+                <section>
+                    <h2>Training Controls</h2>
+                    <div class="toggle-row">
+                        <label class="check"><input name="gpu_train" type="checkbox" checked> Prefer GPU</label>
+                        <label class="check"><input name="use_qlora" type="checkbox" checked> Use 4-bit QLoRA</label>
+                    </div>
+                    <div class="grid grid-3">
+                        <label>Batch size <input name="batch_size" type="number" value="1"></label>
+                        <label>Gradient accumulation <input name="grad_accum_steps" type="number" value="16"></label>
+                        <label>Epochs <input name="epochs" type="text" value="1"></label>
+                        <label>Max steps <input name="max_steps" type="number" placeholder="Blank = epochs"></label>
+                        <label>Learning rate <input name="learning_rate" type="text" value="5e-5"></label>
+                        <label>Optimizer <input name="optim" type="text" placeholder="Blank = trainer default"></label>
+                    </div>
+                </section>
+
+                <section>
+                    <h2>LoRA Controls</h2>
+                    <div class="grid grid-3">
+                        <label>Rank <input name="lora_rank" type="number" value="16"></label>
+                        <label>Alpha <input name="lora_alpha" type="number" value="16"></label>
+                        <label>Dropout <input name="lora_dropout" type="text" value="0.05"></label>
+                        <label>
+                            Target preset
+                            <select name="lora_target_mode">
+                                <option value="all">All: attention + MLP</option>
+                                <option value="attention">Attention only</option>
+                                <option value="qv">Q/V only</option>
+                            </select>
                         </label>
-                        <label class="inline">
-                            <input type="checkbox" id="gpuTrain" checked>
-                            16 GB GPU QLoRA mode: 4-bit, rank 16, coding-first mix
-                        </label>
-                        <label class="inline">
-                            <input type="checkbox" id="quickTrain">
-                            Quick test only: 5 steps, shorter context
+                        <label>
+                            Custom target modules
+                            <input name="lora_target_modules" type="text" placeholder="q_proj,v_proj">
                         </label>
                     </div>
+                </section>
+
+                <div class="actions">
+                    <button id="trainButton" type="submit" class="good">Start Training</button>
+                    <button id="stopButton" type="button" class="danger" disabled>Stop</button>
+                    <button id="clearButton" type="button" class="secondary">Clear Data</button>
+                    <button id="refreshButton" type="button" class="secondary">Refresh Status</button>
                 </div>
-                <div class="controls">
-                    <button id="trainButton" type="button">Train Coding Agent</button>
-                    <button id="stopButton" type="button" disabled>Stop</button>
-                    <button id="clearProjectButton" type="button">Clear Text Memory</button>
-                </div>
-                <div id="status">Idle</div>
-                <div id="storageStatus" class="muted"></div>
+                <p class="small" id="status">Idle</p>
+            </form>
+
+            <div class="log-panel">
+                <h2>Training Log</h2>
                 <pre id="log"></pre>
-            </section>
-
-            <aside class="panel chat-panel">
-                <button class="chat-resize-handle chat-resize-x" type="button" data-resize-axis="x" aria-label="Resize chat width"></button>
-                <button class="chat-resize-handle chat-resize-y" type="button" data-resize-axis="y" aria-label="Resize chat height"></button>
-                <button class="chat-resize-handle chat-resize-both" type="button" data-resize-axis="both" aria-label="Resize chat panel"></button>
-                <div class="panel-heading">
-                    <div>
-                        <p class="eyebrow">Inference Bay</p>
-                        <h2>Chat</h2>
-                    </div>
-                    <div id="chatStatus" class="chat-status">Coding adapter ready after training completes.</div>
-                </div>
-                <div id="chatLog" class="chat-log"></div>
-                <div class="chat-actions">
-                    <textarea id="chatInput" placeholder="Ask your trained coding agent..."></textarea>
-                    <div class="advanced-grid">
-                        <label>
-                            Reply length
-                            <select id="chatMaxTokens">
-                                <option value="80">Short</option>
-                                <option value="160" selected>Normal</option>
-                                <option value="320">Long</option>
-                                <option value="512">Very long</option>
-                            </select>
-                        </label>
-                        <label>
-                            Temperature
-                            <select id="chatTemperature">
-                                <option value="0">Precise</option>
-                                <option value="0.4">Controlled</option>
-                                <option value="0.7" selected>Balanced</option>
-                                <option value="1">Creative</option>
-                            </select>
-                        </label>
-                    </div>
-                    <div class="controls">
-                        <button id="sendChatButton" type="button">Send</button>
-                        <button id="clearChatButton" type="button">Clear</button>
-                    </div>
-                </div>
-            </aside>
+            </div>
         </div>
-    </main>
 
-    <script>
-        const personalityInput = document.getElementById('personalityFiles');
-        const generalInput = document.getElementById('generalFiles');
-        const personalityFolderSummary = document.getElementById('personalityFolderSummary');
-        const generalFolderSummary = document.getElementById('generalFolderSummary');
-        const pageTabsEl = document.getElementById('pageTabs');
-        const pageTabName = document.getElementById('pageTabName');
-        const newPageTabButton = document.getElementById('newPageTabButton');
-        const savePageTabButton = document.getElementById('savePageTabButton');
-        const renamePageTabButton = document.getElementById('renamePageTabButton');
-        const pageTabStatus = document.getElementById('pageTabStatus');
-        const modelSelect = document.getElementById('modelSelect');
-        const modelPath = document.getElementById('modelPath');
-        const customModelLabel = document.getElementById('customModelLabel');
-        const agentInstructions = document.getElementById('agentInstructions');
-        const assistantSpeakerName = document.getElementById('assistantSpeakerName');
-        const personalityWeight = document.getElementById('personalityWeight');
-        const priorityReadout = document.getElementById('priorityReadout');
-        const maxLength = document.getElementById('maxLength');
-        const loraRank = document.getElementById('loraRank');
-        const loraAlpha = document.getElementById('loraAlpha');
-        const learningRate = document.getElementById('learningRate');
-        const epochs = document.getElementById('epochs');
-        const chatContextMax = document.getElementById('chatContextMax');
-        const hfToken = document.getElementById('hfToken');
-        const hfTokenStatus = document.getElementById('hfTokenStatus');
-        const allowDownload = document.getElementById('allowDownload');
-        const gpuTrain = document.getElementById('gpuTrain');
-        const quickTrain = document.getElementById('quickTrain');
-        const trainButton = document.getElementById('trainButton');
-        const stopButton = document.getElementById('stopButton');
-        const clearProjectButton = document.getElementById('clearProjectButton');
-        const statusEl = document.getElementById('status');
-        const storageStatus = document.getElementById('storageStatus');
-        const logEl = document.getElementById('log');
-        const workspace = document.querySelector('.workspace');
-        const chatPanel = document.querySelector('.chat-panel');
-        const chatResizeHandles = document.querySelectorAll('.chat-resize-handle');
-        const chatLog = document.getElementById('chatLog');
-        const chatInput = document.getElementById('chatInput');
-        const chatMaxTokens = document.getElementById('chatMaxTokens');
-        const chatTemperature = document.getElementById('chatTemperature');
-        const chatStatus = document.getElementById('chatStatus');
-        const sendChatButton = document.getElementById('sendChatButton');
-        const clearChatButton = document.getElementById('clearChatButton');
-        const apiBase = window.location.protocol === 'file:'
-            ? 'http://127.0.0.1:5000'
-            : window.location.origin;
-        const ignoredDirectories = new Set([
-            '.git',
-            '.hg',
-            '.svn',
-            '.venv',
-            'venv',
-            'env',
-            'node_modules',
-            '__pycache__',
-            '.dart_tool',
-            '.gradle',
-            '.idea',
-            'build',
-            'bin',
-            'obj',
-            'ephemeral',
-            'intermediates',
-            'conversation-ai-lora',
-            'qwen-code-2.5-lora',
-            'uploads'
-        ]);
-        const binaryExtensions = new Set([
-            '.7z', '.a', '.apk', '.bin', '.bmp', '.class', '.dll', '.dylib',
-            '.exe', '.gif', '.ico', '.jar', '.jpg', '.jpeg', '.keystore',
-            '.mp3', '.mp4', '.o', '.obj', '.pdf', '.png', '.so', '.ttf',
-            '.webp', '.woff', '.woff2', '.zip'
-        ]);
-        const maxFileBytes = 200000;
-        const maxConversationBytes = 5 * 1024 * 1024;
-        const conversationExtensions = new Set(['.txt', '.log', '.chat', '.md', '.json', '.jsonl']);
-        let pollTimer = null;
-        let chatHistory = [];
-        let chatSize = loadChatSize();
-        let pageTabStore = loadPageTabs();
-        let activePageTabId = pageTabStore.activeId;
-        const inferenceOnlyModels = new Set([
-            'Qwen/Qwen2.5-Coder-32B-Instruct',
-            'Qwen/Qwen3-Coder-30B-A3B-Instruct'
-        ]);
+        <aside class="side">
+            <div class="chat">
+                <div>
+                    <h2>Test Adapter</h2>
+                    <p class="small" id="chatStatus">Ready when an adapter exists.</p>
+                </div>
+                <div class="chat-log" id="chatLog"></div>
+                <div class="chat-controls">
+                    <textarea id="chatInput" placeholder="Message the trained adapter"></textarea>
+                    <div class="grid">
+                        <label>Max tokens <input id="chatMaxTokens" type="number" value="160"></label>
+                        <label>Temperature <input id="chatTemperature" type="text" value="0.7"></label>
+                        <label>Top-p <input id="chatTopP" type="text" value="0.9"></label>
+                        <label>Adapter scale <input id="adapterScale" type="text" value="1.0"></label>
+                        <label>Context snippets <input id="contextLimit" type="number" value="6"></label>
+                        <label>Snippet chars <input id="contextChars" type="number" value="1000"></label>
+                    </div>
+                    <div class="actions">
+                        <button id="sendChatButton" type="button">Send</button>
+                        <button id="clearChatButton" type="button" class="secondary">Clear Chat</button>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </div>
+</main>
 
-        modelSelect.addEventListener('change', updateModelControls);
-        document.querySelectorAll('.folder-button').forEach(button => {
-            button.addEventListener('click', () => {
-                document.getElementById(button.dataset.pickerTarget).click();
-            });
-        });
-        personalityInput.addEventListener('change', () => updateFolderSummary(personalityInput, personalityFolderSummary));
-        generalInput.addEventListener('change', () => updateFolderSummary(generalInput, generalFolderSummary));
-        pageTabName.addEventListener('keydown', event => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                renameActivePageTab();
-            }
-        });
-        newPageTabButton.addEventListener('click', createPageTab);
-        savePageTabButton.addEventListener('click', () => saveActivePageTab('Page saved.'));
-        renamePageTabButton.addEventListener('click', renameActivePageTab);
-        personalityWeight.addEventListener('input', updatePriorityReadout);
-        trainButton.addEventListener('click', startTraining);
-        stopButton.addEventListener('click', stopTraining);
-        clearProjectButton.addEventListener('click', clearProjectMemory);
-        sendChatButton.addEventListener('click', sendChat);
-        clearChatButton.addEventListener('click', clearChat);
-        chatResizeHandles.forEach(handle => {
-            handle.addEventListener('pointerdown', startChatResize);
-            handle.addEventListener('keydown', resizeChatWithKeyboard);
-        });
-        chatInput.addEventListener('keydown', event => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                sendChat();
-            }
-        });
-        window.addEventListener('resize', () => applyChatSize(chatSize));
-        [
-            modelSelect, modelPath, agentInstructions, assistantSpeakerName, personalityWeight,
-            maxLength, loraRank, loraAlpha, learningRate, epochs, chatContextMax,
-            allowDownload, gpuTrain, quickTrain, chatMaxTokens, chatTemperature
-        ].forEach(input => {
-            input.addEventListener('input', () => saveActivePageTab());
-            input.addEventListener('change', () => saveActivePageTab());
-        });
-        renderPageTabs();
-        applyActivePageTab();
-        checkServer();
-        updateModelControls();
-        updatePriorityReadout();
-        applyChatSize(chatSize);
+<script>
+    const apiBase = `${location.protocol}//${location.host}`;
+    const trainForm = document.getElementById('trainForm');
+    const filesInput = document.getElementById('files');
+    const trainButton = document.getElementById('trainButton');
+    const stopButton = document.getElementById('stopButton');
+    const clearButton = document.getElementById('clearButton');
+    const refreshButton = document.getElementById('refreshButton');
+    const statusEl = document.getElementById('status');
+    const logEl = document.getElementById('log');
+    const serverPill = document.getElementById('serverPill');
+    const adapterPill = document.getElementById('adapterPill');
+    const storagePill = document.getElementById('storagePill');
+    const agentInstructions = document.getElementById('agentInstructions');
+    const hfToken = document.getElementById('hfToken');
+    const hfTokenStatus = document.getElementById('hfTokenStatus');
+    const chatLog = document.getElementById('chatLog');
+    const chatInput = document.getElementById('chatInput');
+    const chatStatus = document.getElementById('chatStatus');
+    let pollTimer = null;
+    let chatHistory = [];
 
-        function loadChatSize() {
-            return {
-                width: loadSavedNumber('chatColumnWidth', 430),
-                height: loadSavedNumber('chatPanelHeight', 620)
-            };
+    trainForm.addEventListener('submit', startTraining);
+    stopButton.addEventListener('click', stopTraining);
+    clearButton.addEventListener('click', clearData);
+    refreshButton.addEventListener('click', pollStatus);
+    document.getElementById('sendChatButton').addEventListener('click', sendChat);
+    document.getElementById('clearChatButton').addEventListener('click', clearChat);
+    chatInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+            sendChat();
+        }
+    });
+
+    async function startTraining(event) {
+        event.preventDefault();
+        if (!filesInput.files.length) {
+            statusEl.textContent = 'Choose files or a folder first.';
+            return;
         }
 
-        function loadSavedNumber(key, fallback) {
-            const savedValue = Number(localStorage.getItem(key));
-            return Number.isFinite(savedValue) && savedValue > 0 ? savedValue : fallback;
+        const formData = new FormData(trainForm);
+        formData.delete('files');
+        for (const checkbox of trainForm.querySelectorAll('input[type="checkbox"]')) {
+            formData.set(checkbox.name, checkbox.checked ? '1' : '0');
+        }
+        for (const file of filesInput.files) {
+            formData.append('files', file, file.webkitRelativePath || file.name);
         }
 
-        function getChatSizeBounds() {
-            const workspaceWidth = workspace.getBoundingClientRect().width;
-            const availableHeight = Math.max(500, window.innerHeight - 96);
-            return {
-                minWidth: 320,
-                maxWidth: Math.max(320, Math.min(860, workspaceWidth - 420)),
-                minHeight: 500,
-                maxHeight: Math.max(500, Math.min(1000, availableHeight))
-            };
-        }
+        trainButton.disabled = true;
+        stopButton.disabled = false;
+        statusEl.textContent = `Uploading ${filesInput.files.length} files...`;
+        logEl.textContent = '';
 
-        function applyChatSize(nextSize) {
-            if (!window.matchMedia('(min-width: 1061px)').matches) {
-                chatSize = nextSize;
-                return;
-            }
-
-            const bounds = getChatSizeBounds();
-            chatSize = {
-                width: Math.min(Math.max(nextSize.width, bounds.minWidth), bounds.maxWidth),
-                height: Math.min(Math.max(nextSize.height, bounds.minHeight), bounds.maxHeight)
-            };
-            workspace.style.setProperty('--chat-width', `${chatSize.width}px`);
-            chatPanel.style.setProperty('--chat-height', `${chatSize.height}px`);
-            localStorage.setItem('chatColumnWidth', String(Math.round(chatSize.width)));
-            localStorage.setItem('chatPanelHeight', String(Math.round(chatSize.height)));
-        }
-
-        function startChatResize(event) {
-            if (!window.matchMedia('(min-width: 1061px)').matches) {
-                return;
-            }
-
-            event.preventDefault();
-            const handle = event.currentTarget;
-            const axis = handle.dataset.resizeAxis;
-            const startX = event.clientX;
-            const startY = event.clientY;
-            const startSize = { ...chatSize };
-            handle.setPointerCapture(event.pointerId);
-            workspace.classList.add('is-resizing-chat');
-
-            const handlePointerMove = moveEvent => {
-                const nextSize = { ...startSize };
-                if (axis === 'x' || axis === 'both') {
-                    nextSize.width = startSize.width + startX - moveEvent.clientX;
-                }
-                if (axis === 'y' || axis === 'both') {
-                    nextSize.height = startSize.height + moveEvent.clientY - startY;
-                }
-                applyChatSize(nextSize);
-            };
-
-            const stopResize = () => {
-                workspace.classList.remove('is-resizing-chat');
-                handle.removeEventListener('pointermove', handlePointerMove);
-                handle.removeEventListener('pointerup', stopResize);
-                handle.removeEventListener('pointercancel', stopResize);
-            };
-
-            handle.addEventListener('pointermove', handlePointerMove);
-            handle.addEventListener('pointerup', stopResize);
-            handle.addEventListener('pointercancel', stopResize);
-        }
-
-        function resizeChatWithKeyboard(event) {
-            const resizeKeys = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']);
-            if (!resizeKeys.has(event.key)) {
-                return;
-            }
-
-            event.preventDefault();
-            const axis = event.currentTarget.dataset.resizeAxis;
-            const step = event.shiftKey ? 48 : 24;
-            const nextSize = { ...chatSize };
-            if ((axis === 'x' || axis === 'both') && event.key === 'ArrowLeft') {
-                nextSize.width += step;
-            }
-            if ((axis === 'x' || axis === 'both') && event.key === 'ArrowRight') {
-                nextSize.width -= step;
-            }
-            if ((axis === 'y' || axis === 'both') && event.key === 'ArrowDown') {
-                nextSize.height += step;
-            }
-            if ((axis === 'y' || axis === 'both') && event.key === 'ArrowUp') {
-                nextSize.height -= step;
-            }
-            applyChatSize(nextSize);
-        }
-
-        function loadPageTabs() {
-            const fallback = {
-                activeId: 'tab-1',
-                lastCompletedId: '',
-                tabs: [{ id: 'tab-1', name: 'Default', completedAt: '', state: {} }]
-            };
-            try {
-                const stored = JSON.parse(localStorage.getItem('pageTabs') || '');
-                if (!stored || !Array.isArray(stored.tabs) || stored.tabs.length === 0) {
-                    return fallback;
-                }
-                return {
-                    activeId: stored.activeId || stored.tabs[0].id,
-                    lastCompletedId: stored.lastCompletedId || '',
-                    tabs: stored.tabs
-                };
-            } catch {
-                return fallback;
-            }
-        }
-
-        function persistPageTabs() {
-            localStorage.setItem('pageTabs', JSON.stringify(pageTabStore));
-        }
-
-        function activePageTab() {
-            return pageTabStore.tabs.find(tab => tab.id === activePageTabId) || pageTabStore.tabs[0];
-        }
-
-        function capturePageState() {
-            return {
-                modelSelect: modelSelect.value,
-                modelPath: modelPath.value,
-                agentInstructions: agentInstructions.value,
-                assistantSpeakerName: assistantSpeakerName.value,
-                personalityWeight: personalityWeight.value,
-                maxLength: maxLength.value,
-                loraRank: loraRank.value,
-                loraAlpha: loraAlpha.value,
-                learningRate: learningRate.value,
-                epochs: epochs.value,
-                chatContextMax: chatContextMax.value,
-                allowDownload: allowDownload.checked,
-                gpuTrain: gpuTrain.checked,
-                quickTrain: quickTrain.checked,
-                chatMaxTokens: chatMaxTokens.value,
-                chatTemperature: chatTemperature.value,
-                chatInput: chatInput.value,
-                chatHistory,
-                personalityFolderSummary: personalityFolderSummary.textContent,
-                generalFolderSummary: generalFolderSummary.textContent
-            };
-        }
-
-        function applyPageState(state = {}) {
-            modelSelect.value = state.modelSelect || modelSelect.value;
-            modelPath.value = state.modelPath || '';
-            agentInstructions.value = state.agentInstructions || '';
-            assistantSpeakerName.value = state.assistantSpeakerName || '';
-            personalityWeight.value = state.personalityWeight || '40';
-            maxLength.value = state.maxLength || '1024';
-            loraRank.value = state.loraRank || '16';
-            loraAlpha.value = state.loraAlpha || '16';
-            learningRate.value = state.learningRate || '5e-5';
-            epochs.value = state.epochs || '1';
-            chatContextMax.value = state.chatContextMax || '15';
-            allowDownload.checked = state.allowDownload ?? true;
-            gpuTrain.checked = state.gpuTrain ?? true;
-            quickTrain.checked = state.quickTrain ?? false;
-            chatMaxTokens.value = state.chatMaxTokens || '160';
-            chatTemperature.value = state.chatTemperature || '0.7';
-            chatInput.value = state.chatInput || '';
-            personalityFolderSummary.textContent = state.personalityFolderSummary || 'No folder selected';
-            generalFolderSummary.textContent = state.generalFolderSummary || 'No folder selected';
-            chatHistory = Array.isArray(state.chatHistory) ? state.chatHistory : [];
-            renderChatHistory();
-            updateModelControls();
-            updatePriorityReadout();
-        }
-
-        function renderPageTabs() {
-            pageTabsEl.textContent = '';
-            for (const tab of pageTabStore.tabs) {
-                const button = document.createElement('button');
-                button.type = 'button';
-                button.className = 'page-tab';
-                button.textContent = tab.name;
-                button.setAttribute('role', 'tab');
-                button.setAttribute('aria-selected', tab.id === activePageTabId ? 'true' : 'false');
-                if (tab.id === activePageTabId) {
-                    button.classList.add('is-active');
-                }
-                if (tab.id === pageTabStore.lastCompletedId) {
-                    button.classList.add('is-last-trained');
-                    button.title = tab.completedAt ? `Last finished training: ${new Date(tab.completedAt).toLocaleString()}` : 'Last finished training';
-                }
-                button.addEventListener('click', () => switchPageTab(tab.id));
-                pageTabsEl.appendChild(button);
-            }
-        }
-
-        function applyActivePageTab() {
-            const tab = activePageTab();
-            activePageTabId = tab.id;
-            pageTabStore.activeId = tab.id;
-            pageTabName.value = tab.name;
-            applyPageState(tab.state);
-            renderPageTabs();
-            persistPageTabs();
-        }
-
-        function switchPageTab(tabId) {
-            saveActivePageTab();
-            activePageTabId = tabId;
-            applyActivePageTab();
-            pageTabStatus.textContent = `Loaded "${activePageTab().name}".`;
-        }
-
-        function saveActivePageTab(message = '') {
-            const tab = activePageTab();
-            tab.state = capturePageState();
-            pageTabStore.activeId = tab.id;
-            persistPageTabs();
-            renderPageTabs();
-            if (message) {
-                pageTabStatus.textContent = message;
-            }
-        }
-
-        function createPageTab() {
-            saveActivePageTab();
-            const nextNumber = pageTabStore.tabs.length + 1;
-            const tab = {
-                id: `tab-${Date.now()}`,
-                name: `Tab ${nextNumber}`,
-                completedAt: '',
-                state: capturePageState()
-            };
-            pageTabStore.tabs.push(tab);
-            activePageTabId = tab.id;
-            applyActivePageTab();
-            pageTabName.focus();
-            pageTabName.select();
-            pageTabStatus.textContent = 'New page tab created.';
-        }
-
-        function renameActivePageTab() {
-            const nextName = pageTabName.value.trim();
-            if (!nextName) {
-                pageTabStatus.textContent = 'Type a tab name first.';
-                return;
-            }
-            const tab = activePageTab();
-            tab.name = nextName;
-            persistPageTabs();
-            renderPageTabs();
-            pageTabStatus.textContent = `Renamed tab to "${nextName}".`;
-        }
-
-        function markActiveTabTrainingComplete() {
-            const tab = activePageTab();
-            tab.completedAt = new Date().toISOString();
-            tab.state = capturePageState();
-            pageTabStore.lastCompletedId = tab.id;
-            persistPageTabs();
-            renderPageTabs();
-        }
-
-        function selectedModelPath() {
-            return modelSelect.value === 'custom'
-                ? modelPath.value.trim()
-                : modelSelect.value;
-        }
-
-        function updateModelControls() {
-            const isCustom = modelSelect.value === 'custom';
-            customModelLabel.hidden = !isCustom;
-            allowDownload.disabled = false;
-            if (inferenceOnlyModels.has(modelSelect.value)) {
-                statusEl.textContent = 'That model is listed for inference/VS Code use, not local QLoRA training on this GPU.';
-            } else if (statusEl.textContent.startsWith('That model is listed')) {
-                statusEl.textContent = 'Idle';
-            }
-        }
-
-        function updatePriorityReadout() {
-            const personality = Number(personalityWeight.value);
-            priorityReadout.textContent = `${personality} / ${100 - personality}`;
-        }
-
-        function updateFolderSummary(input, summaryEl) {
-            const files = Array.from(input.files);
-            if (files.length === 0) {
-                summaryEl.textContent = 'No folder selected';
-                return;
-            }
-
-            const firstPath = files[0].webkitRelativePath || files[0].name;
-            const folderName = firstPath.split(/[\\/]+/)[0] || 'Selected folder';
-            const supportedCount = files.filter(shouldUploadFile).length;
-            summaryEl.textContent = `${folderName} - ${supportedCount} supported text files`;
-            saveActivePageTab();
-        }
-
-        async function startTraining() {
-            const modelChoice = selectedModelPath();
-            if (!modelChoice) {
-                statusEl.textContent = 'Choose a model or enter a custom model path.';
-                return;
-            }
-            if (inferenceOnlyModels.has(modelChoice)) {
-                statusEl.textContent = 'Pick a 0.5B, 1.5B, 3B, 7B, or 14B model for training. 30B/32B are inference-only here.';
-                return;
-            }
-
-            const selectedPersonalityFiles = Array.from(personalityInput.files);
-            const selectedGeneralFiles = Array.from(generalInput.files);
-            const personalityFiles = selectedPersonalityFiles.filter(shouldUploadFile);
-            const generalFiles = selectedGeneralFiles.filter(shouldUploadFile);
-            const totalFiles = personalityFiles.length + generalFiles.length;
-            if (totalFiles === 0) {
-                statusEl.textContent = selectedPersonalityFiles.length + selectedGeneralFiles.length === 0
-                    ? 'Choose a personality data folder, a general IQ data folder, or both.'
-                    : 'No supported text files found in the selected folder after filtering.';
-                return;
-            }
-
-            const formData = new FormData();
-            formData.append('model_path', modelChoice);
-            formData.append('agent_instructions', agentInstructions.value.trim());
-            formData.append('assistant_speaker_name', assistantSpeakerName.value.trim());
-            const personality = Number(personalityWeight.value);
-            formData.append('personality_weight', String(personality));
-            formData.append('general_weight', String(100 - personality));
-            formData.append('max_length', maxLength.value);
-            formData.append('lora_rank', loraRank.value);
-            formData.append('lora_alpha', loraAlpha.value);
-            formData.append('learning_rate', learningRate.value);
-            formData.append('epochs', epochs.value);
-            formData.append('chat_context_min', '1');
-            formData.append('chat_context_max', chatContextMax.value);
-            formData.append('hf_token', hfToken.value.trim());
-            formData.append('allow_model_download', allowDownload.checked ? '1' : '0');
-            formData.append('gpu_train', gpuTrain.checked ? '1' : '0');
-            formData.append('quick_train', quickTrain.checked ? '1' : '0');
-            for (const file of personalityFiles) {
-                formData.append('personality_files', file, file.webkitRelativePath || file.name);
-            }
-            for (const file of generalFiles) {
-                formData.append('general_files', file, file.webkitRelativePath || file.name);
-            }
-
-            trainButton.disabled = true;
-            stopButton.disabled = false;
-            statusEl.textContent = `Uploading ${totalFiles} text files from selected folders (${personalityFiles.length} personality, ${generalFiles.length} general)...`;
-            logEl.textContent = '';
-
-            try {
-                const response = await fetch(`${apiBase}/train`, {
-                    method: 'POST',
-                    body: formData
-                });
-                const result = await readJson(response);
-
-                if (!response.ok) {
-                    throw new Error(result.error || 'Error starting training.');
-                }
-
-                saveActivePageTab();
-                statusEl.textContent = `Training "${activePageTab().name}" started with ${result.files} files.`;
-                startPolling();
-            } catch (error) {
-                statusEl.textContent = `${error.message} Server checked at ${apiBase}. Try opening http://127.0.0.1:5000 directly and choose a smaller code folder.`;
-                trainButton.disabled = false;
-                stopButton.disabled = true;
-            }
-        }
-
-        async function stopTraining() {
+        try {
+            const response = await fetch(`${apiBase}/train`, { method: 'POST', body: formData });
+            const result = await readJson(response);
+            if (!response.ok) throw new Error(result.error || 'Could not start training.');
+            statusEl.textContent = `Training started with ${result.files} files.`;
+            startPolling();
+        } catch (error) {
+            statusEl.textContent = error.message;
+            trainButton.disabled = false;
             stopButton.disabled = true;
-            statusEl.textContent = 'Stopping training...';
-
-            try {
-                const response = await fetch(`${apiBase}/stop`, { method: 'POST' });
-                const result = await readJson(response);
-                statusEl.textContent = result.message || 'Training stopped.';
-            } catch (error) {
-                statusEl.textContent = `${error.message} Could not stop training from the page.`;
-            } finally {
-                trainButton.disabled = false;
-                clearInterval(pollTimer);
-                pollStatus();
-            }
         }
+    }
 
-        async function clearProjectMemory() {
-            clearProjectButton.disabled = true;
-            statusEl.textContent = 'Clearing project memory...';
-
-            try {
-                const response = await fetch(`${apiBase}/clear-memory`, { method: 'POST' });
-                const result = await readJson(response);
-                if (!response.ok) {
-                    throw new Error(result.error || 'Could not clear project memory.');
-                }
-                statusEl.textContent = result.message;
-                chatStatus.textContent = 'Text memory cleared. Retrain or upload again.';
-            } catch (error) {
-                statusEl.textContent = error.message;
-            } finally {
-                clearProjectButton.disabled = false;
-            }
-        }
-
-        function startPolling() {
+    async function stopTraining() {
+        stopButton.disabled = true;
+        statusEl.textContent = 'Stopping training...';
+        try {
+            const response = await fetch(`${apiBase}/stop`, { method: 'POST' });
+            const result = await readJson(response);
+            statusEl.textContent = result.message || 'Stopped.';
+        } catch (error) {
+            statusEl.textContent = error.message;
+        } finally {
+            trainButton.disabled = false;
             clearInterval(pollTimer);
             pollStatus();
-            pollTimer = setInterval(pollStatus, 2000);
         }
+    }
 
-        async function pollStatus() {
-            let response;
-            let result;
-            try {
-                response = await fetch(`${apiBase}/status`);
-                result = await readJson(response);
-            } catch (error) {
-                clearInterval(pollTimer);
-                trainButton.disabled = false;
-                statusEl.textContent = `${error.message} Could not reach ${apiBase}.`;
-                return;
-            }
+    async function clearData() {
+        clearButton.disabled = true;
+        try {
+            const response = await fetch(`${apiBase}/clear-memory`, { method: 'POST' });
+            const result = await readJson(response);
+            if (!response.ok) throw new Error(result.error || 'Could not clear data.');
+            statusEl.textContent = result.message;
+            logEl.textContent = '';
+        } catch (error) {
+            statusEl.textContent = error.message;
+        } finally {
+            clearButton.disabled = false;
+            pollStatus();
+        }
+    }
 
+    function startPolling() {
+        clearInterval(pollTimer);
+        pollStatus();
+        pollTimer = setInterval(pollStatus, 2000);
+    }
+
+    async function pollStatus() {
+        try {
+            const response = await fetch(`${apiBase}/status`);
+            const result = await readJson(response);
             logEl.textContent = result.log || '';
-            if (result.storage_dir) {
-                storageStatus.textContent = `Saving data in: ${result.storage_dir}`;
-            }
             logEl.scrollTop = logEl.scrollHeight;
+            storagePill.textContent = `Storage: ${result.storage_dir || 'unknown'}`;
+            adapterPill.textContent = result.adapter_ready ? 'Adapter: ready' : 'Adapter: missing';
+            serverPill.textContent = 'Server: connected';
 
             if (result.running) {
                 statusEl.textContent = 'Training running...';
@@ -1592,137 +568,123 @@
                 return;
             }
 
-            clearInterval(pollTimer);
             trainButton.disabled = false;
             stopButton.disabled = true;
-            statusEl.textContent = result.exit_code === 0
-                ? 'Training completed.'
-                : `Training stopped with exit code ${result.exit_code}.`;
-            if (result.exit_code === 0) {
-                markActiveTabTrainingComplete();
-                chatStatus.textContent = 'Training complete. Marked this tab as the latest finished run.';
-            }
+            clearInterval(pollTimer);
+            if (result.exit_code === null) return;
+            statusEl.textContent = result.exit_code === 0 ? 'Training completed.' : `Training stopped with exit code ${result.exit_code}.`;
+        } catch (error) {
+            serverPill.textContent = 'Server: offline';
+            statusEl.textContent = `Cannot reach ${apiBase}. Start with python app.py.`;
+            clearInterval(pollTimer);
         }
+    }
 
-        async function readJson(response) {
-            const text = await response.text();
-            try {
-                return text ? JSON.parse(text) : {};
-            } catch {
-                throw new Error(`Server returned ${response.status}: ${text.slice(0, 200)}`);
+    async function checkServer() {
+        try {
+            const response = await fetch(`${apiBase}/ping`);
+            const result = await readJson(response);
+            serverPill.textContent = 'Server: connected';
+            adapterPill.textContent = result.adapter_ready ? 'Adapter: ready' : 'Adapter: missing';
+            storagePill.textContent = `Storage: ${result.storage_dir}`;
+            applyDefaults(result.defaults || {});
+            if (result.has_hf_token) {
+                hfToken.placeholder = `Using server env token (${result.hf_token_length} chars)`;
+                hfTokenStatus.textContent = hfToken.value
+                    ? `Loaded HF_TOKEN from env (${result.hf_token_length} chars).`
+                    : `Server has HF_TOKEN (${result.hf_token_length} chars), but it was not sent to the field.`;
+            } else {
+                hfTokenStatus.textContent = 'No HF_TOKEN found in server env.';
             }
+        } catch {
+            serverPill.textContent = 'Server: offline';
         }
+    }
 
-        async function checkServer() {
-            try {
-                const response = await fetch(`${apiBase}/ping`);
-                if (!response.ok) {
-                    throw new Error(`Server returned ${response.status}`);
+    function applyDefaults(defaults) {
+        for (const [name, value] of Object.entries(defaults)) {
+            const field = trainForm.elements[name];
+            if (!field) continue;
+
+            if (field instanceof RadioNodeList) {
+                for (const item of field) {
+                    if (item.type === 'checkbox') {
+                        item.checked = Boolean(value);
+                    }
                 }
-                const result = await readJson(response);
-                if (!agentInstructions.value && result.agent_instructions) {
-                    agentInstructions.value = result.agent_instructions;
-                }
-                if (result.hf_token) {
-                    hfToken.value = result.hf_token;
-                }
-                hfTokenStatus.textContent = result.has_hf_token
-                    ? `Using Hugging Face token from server env (${result.hf_token_length} chars) unless you type a different one.`
-                    : 'No server env token detected.';
-                statusEl.textContent = `Connected to ${apiBase}`;
-            } catch {
-                statusEl.textContent = `Cannot reach ${apiBase}. Start the server with python app.py, then open http://127.0.0.1:5000.`;
-            }
-        }
-
-        function shouldUploadFile(file) {
-            const relativePath = file.webkitRelativePath || file.name;
-            const parts = relativePath.split(/[\\/]+/);
-            if (parts.some(part => ignoredDirectories.has(part))) {
-                return false;
+                continue;
             }
 
-            const name = file.name.toLowerCase();
-            const dotIndex = name.lastIndexOf('.');
-            const extension = dotIndex >= 0 ? name.slice(dotIndex) : '';
-            const maxBytes = conversationExtensions.has(extension) ? maxConversationBytes : maxFileBytes;
-            if (file.size > maxBytes) {
-                return false;
+            if (field.type === 'checkbox') {
+                field.checked = Boolean(value);
+                continue;
             }
 
-            return !binaryExtensions.has(extension);
-        }
-
-        async function sendChat() {
-            const message = chatInput.value.trim();
-            if (!message) {
-                return;
-            }
-
-            appendMessage('user', message);
-            chatInput.value = '';
-            sendChatButton.disabled = true;
-            chatStatus.textContent = chatHistory.length === 0
-                ? 'Loading adapter into GPU...'
-                : 'Thinking...';
-
-            try {
-                const response = await fetch(`${apiBase}/chat`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        message,
-                        history: chatHistory,
-                        max_new_tokens: Number(chatMaxTokens.value),
-                        temperature: Number(chatTemperature.value)
-                    })
-                });
-                const result = await readJson(response);
-                if (!response.ok) {
-                    throw new Error(result.error || 'Chat failed.');
-                }
-
-                appendMessage('assistant', result.reply || '(empty response)');
-                chatStatus.textContent = result.used_context
-                    ? `Ready - used text memories, ${chatHistory.length} messages in memory`
-                    : `Ready - adapter only, ${chatHistory.length} messages in memory`;
-            } catch (error) {
-                appendMessage('assistant', error.message);
-                chatStatus.textContent = 'Chat error';
-            } finally {
-                sendChatButton.disabled = false;
-                chatInput.focus();
+            if (value !== null && value !== undefined) {
+                field.value = String(value);
             }
         }
+    }
 
-        function appendMessage(role, content) {
-            chatHistory.push({ role, content });
-            const item = document.createElement('div');
-            item.className = `message ${role}`;
-            item.textContent = content;
-            chatLog.appendChild(item);
-            chatLog.scrollTop = chatLog.scrollHeight;
-            saveActivePageTab();
-        }
+    async function sendChat() {
+        const message = chatInput.value.trim();
+        if (!message) return;
+        appendMessage('user', message);
+        chatInput.value = '';
+        chatStatus.textContent = 'Thinking...';
 
-        function renderChatHistory() {
-            chatLog.textContent = '';
-            for (const item of chatHistory) {
-                const message = document.createElement('div');
-                message.className = `message ${item.role}`;
-                message.textContent = item.content;
-                chatLog.appendChild(message);
-            }
-            chatLog.scrollTop = chatLog.scrollHeight;
+        try {
+            const response = await fetch(`${apiBase}/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message,
+                    history: chatHistory,
+                    max_new_tokens: Number(document.getElementById('chatMaxTokens').value),
+                    temperature: Number(document.getElementById('chatTemperature').value),
+                    top_p: Number(document.getElementById('chatTopP').value),
+                    adapter_scale: Number(document.getElementById('adapterScale').value),
+                    context_limit: Number(document.getElementById('contextLimit').value),
+                    context_chars: Number(document.getElementById('contextChars').value)
+                })
+            });
+            const result = await readJson(response);
+            if (!response.ok) throw new Error(result.error || 'Chat failed.');
+            appendMessage('assistant', result.reply || '(empty response)');
+            chatStatus.textContent = result.used_context ? 'Ready: used training snippets.' : 'Ready: adapter only.';
+        } catch (error) {
+            appendMessage('assistant', error.message);
+            chatStatus.textContent = 'Chat error.';
         }
+    }
 
-        function clearChat() {
-            chatHistory = [];
-            chatLog.textContent = '';
-            chatStatus.textContent = 'Ready';
-            chatInput.focus();
-            saveActivePageTab();
+    function appendMessage(role, content) {
+        chatHistory.push({ role, content });
+        const item = document.createElement('div');
+        item.className = `message ${role}`;
+        item.textContent = content;
+        chatLog.appendChild(item);
+        chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    function clearChat() {
+        chatHistory = [];
+        chatLog.textContent = '';
+        chatStatus.textContent = 'Ready.';
+        chatInput.focus();
+    }
+
+    async function readJson(response) {
+        const text = await response.text();
+        try {
+            return text ? JSON.parse(text) : {};
+        } catch {
+            throw new Error(`Server returned ${response.status}: ${text.slice(0, 200)}`);
         }
-    </script>
+    }
+
+    checkServer();
+    pollStatus();
+</script>
 </body>
 </html>

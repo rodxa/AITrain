@@ -1,63 +1,50 @@
-# Local Qwen Coder Agent Trainer
+# AI Training Control
 
-Small Flask app for uploading conversations, notes, transcripts, and code/text files, then fine-tuning a local Qwen Coder model with a QLoRA/LoRA adapter.
+Small Flask app for training a local Qwen-style LoRA/QLoRA adapter from files you choose in the browser.
 
-Recommended setup for this machine:
-
-- Train locally right now with cached `Qwen/Qwen2.5-3B-Instruct` using 4-bit QLoRA.
-- Use `Qwen/Qwen2.5-Coder-7B-Instruct` as the better coding target once Hugging Face downloads are stable.
-- Try `Qwen/Qwen2.5-Coder-14B-Instruct` later if the large Hugging Face shard download is stable on your connection.
-- Run the strongest local VS Code agent with a quantized `Qwen/Qwen3-Coder-30B-A3B-Instruct` through Ollama, LM Studio, llama.cpp, or another OpenAI-compatible local server.
-- Keep personality data light: default mix is coding-first, with WhatsApp/personality examples capped to about 10% of the generated dataset.
-
-Training dropdown options:
-
-- `Qwen/Qwen2.5-Coder-7B-Instruct`: recommended
-- `Qwen/Qwen2.5-Coder-3B-Instruct`: fast test
-- `Qwen/Qwen2.5-Coder-1.5B-Instruct`: very fast test
-- `Qwen/Qwen2.5-Coder-0.5B-Instruct`: smoke test
-- `Qwen/Qwen2.5-Coder-14B-Instruct`: ambitious on this connection
-- `Qwen/Qwen2.5-Coder-32B-Instruct` and `Qwen/Qwen3-Coder-30B-A3B-Instruct`: inference-only here
+The page is the control surface. Uploaded files plus the visible form values are what a training run uses: base model, system prompt, parsing mode, filters, chunking, eval split, LoRA settings, optimizer settings, and chat-test generation settings.
 
 ## Start
 
 ```powershell
 python -m pip install -r requirements.txt
-$env:TRAIN_STORAGE_DIR="C:\TrainData"
-python serve.py
+python app.py
 ```
 
 Open `http://127.0.0.1:5000`.
 
-Fastest start: choose `Qwen2.5 3B Instruct - cached, train now`. It should use the local Hugging Face cache, then train a coding/personality adapter from your uploaded files.
-
-## Files
-
-The app accepts readable text-like files. Conversation formats such as `.txt`, `.log`, `.chat`, `.md`, and `.jsonl` can be up to 5 MB each.
-
-Training writes:
-
-- `uploads/`: copied upload files
-- `training_data.jsonl`: generated text dataset
-- `training.log`: training progress
-- `conversation-ai-lora/`: trained LoRA adapter
-
-By default these files are written in the project folder. Set `TRAIN_STORAGE_DIR` to save them somewhere else, such as `C:\TrainData` on Windows or `/data` in a container.
-
-See `DEPLOY.md` for Docker and online deployment notes.
-
-Do not use an Ollama manifest path like `C:\Users\...\.ollama\models\manifests\...` as the model path. This trainer needs a Hugging Face/Transformers model folder or the downloadable default model.
-
-## Useful Environment Knobs
+Optional:
 
 ```powershell
-$env:QWEN_MODEL_PATH="Qwen/Qwen2.5-3B-Instruct"
-$env:ALLOW_MODEL_DOWNLOAD="1"
+$env:TRAIN_STORAGE_DIR="C:\TrainData"
 $env:HF_TOKEN="hf_your_token_here"
-$env:USE_QLORA="1"
-$env:MAX_LENGTH="1536"
-$env:GRAD_ACCUM_STEPS="16"
-$env:LORA_R="16"
-$env:LORA_TARGET_MODE="all"
 python app.py
 ```
+
+## What Gets Written
+
+- `uploads/`: files copied from the page for the current run
+- `training_data.jsonl`: generated train examples
+- `eval_data.jsonl`: generated eval examples
+- `training.log`: latest training log
+- `conversation-ai-lora/`: trained adapter
+- `agent_instructions.txt`: latest system prompt submitted from the page
+
+`Clear Data` removes uploaded files and generated datasets. It does not delete the trained adapter.
+
+## Data Modes
+
+- `Auto`: conversation files can produce chat examples, and all readable files can produce context chunks.
+- `Chat replies only`: only parsed conversation-style assistant replies become examples.
+- `Raw context chunks only`: files become chunked text examples.
+
+Supported conversation-ish files include `.txt`, `.log`, `.chat`, `.md`, `.json`, and `.jsonl`. Binary files are skipped by the trainer.
+
+## Useful Controls
+
+- `System prompt / behavior instructions`: controls the system message inserted into generated examples and chat tests.
+- `Assistant speaker name`: tells the parser which speaker in chat logs should become the assistant.
+- `Filter low-value replies`: removes empty, deleted, media-placeholder, and link-only replies.
+- `Chunk chars` and `Chunk overlap`: control raw text chunking.
+- `Eval ratio` and `Dataset seed`: control train/eval splitting and shuffle repeatability.
+- `LoRA target modules`: overrides the target preset when filled.

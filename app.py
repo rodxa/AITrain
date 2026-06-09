@@ -1,4 +1,5 @@
-from pathlib import Path
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -6,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 from werkzeug.utils import secure_filename
@@ -18,38 +20,31 @@ def load_env_file(path: Path, *, override: bool, protected_keys: set[str]) -> No
     if not path.exists():
         return
 
-    parsed = []
     current_key = None
     current_value = None
+    parsed: list[tuple[str, str]] = []
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-
         if re.match(r"^[A-Za-z_][A-Za-z0-9_]*\s*=", stripped):
             if current_key is not None:
-                parsed.append((current_key, current_value))
+                parsed.append((current_key, current_value or ""))
             key, value = stripped.split("=", 1)
             current_key = key.strip()
             current_value = value.strip().strip('"').strip("'")
             continue
-
         if current_key is not None:
             current_value = f"{current_value}\n{line.rstrip()}"
 
     if current_key is not None:
-        parsed.append((current_key, current_value))
+        parsed.append((current_key, current_value or ""))
 
     for key, value in parsed:
-        key = key.strip()
-        if not key:
-            continue
-        protected_value = os.environ.get(key) if key in protected_keys else None
-        if override and (key not in protected_keys or not protected_value):
+        if override and (key not in protected_keys or not os.environ.get(key)):
             os.environ[key] = value
-        else:
-            if not os.environ.get(key):
-                os.environ[key] = value
+        elif not os.environ.get(key):
+            os.environ[key] = value
 
 
 PROTECTED_ENV_KEYS = set(os.environ)
@@ -57,7 +52,6 @@ load_env_file(BASE_DIR / ".env.example", override=False, protected_keys=PROTECTE
 load_env_file(BASE_DIR / ".env", override=True, protected_keys=PROTECTED_ENV_KEYS)
 
 STORAGE_DIR = Path(os.environ.get("TRAIN_STORAGE_DIR", BASE_DIR)).resolve()
-STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR = STORAGE_DIR / "uploads"
 LOG_FILE = STORAGE_DIR / "training.log"
 TRAIN_SCRIPT = BASE_DIR / "train_model.py"
@@ -65,193 +59,132 @@ ADAPTER_DIR = STORAGE_DIR / "conversation-ai-lora"
 CHAT_CONTEXT_FILE = STORAGE_DIR / "training_data.jsonl"
 EVAL_CONTEXT_FILE = STORAGE_DIR / "eval_data.jsonl"
 AGENT_INSTRUCTIONS_FILE = STORAGE_DIR / "agent_instructions.txt"
-SAVED_MODELS_DIR = STORAGE_DIR / "saved-models"
-MODEL_REGISTRY_FILE = STORAGE_DIR / "saved_models.json"
-DEFAULT_TRAIN_MODEL = "Qwen/Qwen2.5-3B-Instruct"
-RECOMMENDED_INFERENCE_MODEL = "Qwen/Qwen3-Coder-30B-A3B-Instruct"
-INFERENCE_ONLY_MODELS = {
-    "Qwen/Qwen2.5-Coder-32B-Instruct",
-    "Qwen/Qwen3-Coder-30B-A3B-Instruct",
-}
-XAVIER_SYSTEM_PROMPT = (
-    "You are Xavier. You answer helpfully, but your tone is casual, slightly chaotic, short, "
-    "and WhatsApp-like. Use words like lol, lel, düd, wtf, ok, damn, nah, ye sometimes. "
-    "Do not sound formal. Still answer the question properly."
-)
-DEFAULT_ADAPTER_SCALE = float(os.environ.get("ADAPTER_SCALE", "0.75"))
-DEFAULT_CHAT_MAX_NEW_TOKENS = int(os.environ.get("CHAT_MAX_NEW_TOKENS", "160"))
-DEFAULT_AGENT_INSTRUCTIONS = os.environ.get(
-    "AGENT_INSTRUCTIONS",
-    "Code professionally first. Be concise, practical, and direct. Preserve my casual writing style where it feels natural, "
-    "but do not sacrifice correctness. Prioritize coding ability over personality.",
-)
-XAVIER_SYSTEM_PROMPT = DEFAULT_AGENT_INSTRUCTIONS
-DEFAULT_AGENT_INSTRUCTIONS = os.environ.get("AGENT_INSTRUCTIONS", "")
-XAVIER_SYSTEM_PROMPT = DEFAULT_AGENT_INSTRUCTIONS
+
+STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__)
-training_process = None
-chat_state = {"model": None, "tokenizer": None, "torch": None, "model_id": None, "adapter_dir": None}
+training_process: subprocess.Popen | None = None
 chat_lock = threading.Lock()
-context_cache = {"path": None, "mtime": None, "rows": []}
+chat_state = {"model": None, "tokenizer": None, "torch": None, "adapter_dir": None}
+context_cache = {"mtime": None, "rows": []}
 adapter_scale_state = {"value": None}
-
-
-def slugify_model_id(name: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", name.strip().lower()).strip("-")
-    return slug or "model"
-
-
-def unique_model_id(name: str, registry: dict | None = None) -> str:
-    registry = registry if registry is not None else load_model_registry()
-    base = slugify_model_id(name)
-    candidate = base
-    counter = 2
-    while candidate in registry:
-        candidate = f"{base}-{counter}"
-        counter += 1
-    return candidate
-
-
-def load_model_registry() -> dict:
-    if not MODEL_REGISTRY_FILE.exists():
-        return {}
-    try:
-        data = json.loads(MODEL_REGISTRY_FILE.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    return {str(key): value for key, value in data.items() if isinstance(value, dict)}
-
-
-def save_model_registry(registry: dict) -> None:
-    MODEL_REGISTRY_FILE.write_text(json.dumps(registry, indent=2, sort_keys=True), encoding="utf-8")
-
-
-def model_slot_paths(model_id: str) -> dict[str, Path]:
-    if model_id == "current":
-        return {
-            "storage": STORAGE_DIR,
-            "uploads": UPLOAD_DIR,
-            "adapter": ADAPTER_DIR,
-            "context": CHAT_CONTEXT_FILE,
-            "eval": EVAL_CONTEXT_FILE,
-        }
-
-    storage = SAVED_MODELS_DIR / model_id
-    return {
-        "storage": storage,
-        "uploads": storage / "uploads",
-        "adapter": storage / "adapter",
-        "context": storage / "training_data.jsonl",
-        "eval": storage / "eval_data.jsonl",
-    }
-
-
-def ensure_model_block(name: str, model_id: str = "") -> dict:
-    registry = load_model_registry()
-    model_id = slugify_model_id(model_id) if model_id else unique_model_id(name or "New model", registry)
-    display_name = (name or registry.get(model_id, {}).get("name") or model_id).strip()
-    registry[model_id] = {"name": display_name}
-    save_model_registry(registry)
-    return {"id": model_id, "name": display_name, **model_slot_paths(model_id)}
-
-
-def saved_model_blocks() -> list[dict]:
-    registry = load_model_registry()
-    blocks = []
-
-    if ADAPTER_DIR.exists():
-        legacy_name = registry.get("current", {}).get("name", "Current adapter")
-        blocks.append({
-            "id": "current",
-            "name": legacy_name,
-            "ready": (ADAPTER_DIR / "adapter_config.json").exists(),
-            "adapter_dir": str(ADAPTER_DIR),
-            "context_file": str(CHAT_CONTEXT_FILE),
-        })
-
-    for model_id, item in sorted(registry.items(), key=lambda pair: pair[1].get("name", pair[0]).lower()):
-        if model_id == "current":
-            continue
-        paths = model_slot_paths(model_id)
-        blocks.append({
-            "id": model_id,
-            "name": item.get("name") or model_id,
-            "ready": (paths["adapter"] / "adapter_config.json").exists(),
-            "adapter_dir": str(paths["adapter"]),
-            "context_file": str(paths["context"]),
-        })
-
-    return blocks
-
-
-def current_agent_instructions() -> str:
-    if AGENT_INSTRUCTIONS_FILE.exists():
-        text = AGENT_INSTRUCTIONS_FILE.read_text(encoding="utf-8", errors="replace").strip()
-        return text
-    return DEFAULT_AGENT_INSTRUCTIONS
-
-
-def env_agent_instructions() -> str:
-    return os.environ.get("AGENT_INSTRUCTIONS", DEFAULT_AGENT_INSTRUCTIONS)
 
 
 def env_hf_token() -> str:
     return os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or ""
 
 
+def env_value(*names: str, default: str = "") -> str:
+    for name in names:
+        value = os.environ.get(name)
+        if value is not None:
+            return value
+    return default
+
+
+def env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "on", "yes"}
+
+
+def current_agent_instructions() -> str:
+    env_instructions = os.environ.get("AGENT_INSTRUCTIONS", "").strip()
+    if env_instructions:
+        return env_instructions
+    if AGENT_INSTRUCTIONS_FILE.exists():
+        return AGENT_INSTRUCTIONS_FILE.read_text(encoding="utf-8", errors="replace").strip()
+    return ""
+
+
+def form_defaults() -> dict:
+    return {
+        "model_path": env_value("QWEN_MODEL_PATH", "MODEL_PATH", default="Qwen/Qwen2.5-3B-Instruct"),
+        "assistant_speaker_name": env_value("ASSISTANT_SPEAKER_NAME"),
+        "agent_instructions": current_agent_instructions(),
+        "data_mode": env_value("DATA_MODE", default="auto"),
+        "dataset_seed": env_value("DATASET_SEED", default="42"),
+        "eval_ratio": env_value("EVAL_RATIO", default="0.08"),
+        "max_file_bytes": env_value("MAX_FILE_BYTES", default="200000"),
+        "max_conversation_bytes": env_value("MAX_CONVERSATION_BYTES", default=str(5 * 1024 * 1024)),
+        "chunk_chars": env_value("CHUNK_CHARS", default="3500"),
+        "chunk_overlap": env_value("CHUNK_OVERLAP", default="500"),
+        "max_length": env_value("MAX_LENGTH", default="1024"),
+        "chat_context_min": env_value("CHAT_CONTEXT_MIN", "WHATSAPP_CONTEXT_MIN", default="1"),
+        "chat_context_max": env_value("CHAT_CONTEXT_MAX", "WHATSAPP_CONTEXT_MAX", default="15"),
+        "batch_size": env_value("BATCH_SIZE", default="1"),
+        "grad_accum_steps": env_value("GRAD_ACCUM_STEPS", default="16"),
+        "epochs": env_value("EPOCHS", default="1"),
+        "max_steps": env_value("MAX_STEPS"),
+        "learning_rate": env_value("LEARNING_RATE", default="5e-5"),
+        "optim": env_value("OPTIM"),
+        "lora_rank": env_value("LORA_R", default="16"),
+        "lora_alpha": env_value("LORA_ALPHA", default="16"),
+        "lora_dropout": env_value("LORA_DROPOUT", default="0.05"),
+        "lora_target_mode": env_value("LORA_TARGET_MODE", default="all"),
+        "lora_target_modules": env_value("LORA_TARGET_MODULES"),
+        "hf_token": env_hf_token(),
+        "allow_model_download": env_bool("ALLOW_MODEL_DOWNLOAD", True),
+        "use_qlora": env_bool("USE_QLORA", True),
+        "gpu_train": env_bool("GPU_TRAIN", True),
+        "filter_low_value_replies": env_bool("FILTER_LOW_VALUE_REPLIES", True),
+        "keep_short_replies": env_bool("KEEP_SHORT_REPLIES", True),
+    }
+
+
 @app.after_request
 def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return response
 
 
-def safe_upload_path(filename: str, upload_root: Path = UPLOAD_DIR) -> Path:
+def safe_upload_path(filename: str) -> Path:
     parts = [secure_filename(part) for part in Path(filename).parts]
     parts = [part for part in parts if part not in {"", ".", ".."}]
     if not parts:
         raise ValueError("Invalid filename")
-    return upload_root.joinpath(*parts)
+    return UPLOAD_DIR.joinpath(*parts)
 
 
-def clear_memory() -> None:
+def clear_training_inputs() -> None:
     if UPLOAD_DIR.exists():
         shutil.rmtree(UPLOAD_DIR)
-    if CHAT_CONTEXT_FILE.exists():
-        CHAT_CONTEXT_FILE.unlink()
-    if EVAL_CONTEXT_FILE.exists():
-        EVAL_CONTEXT_FILE.unlink()
-    context_cache.update({"path": None, "mtime": None, "rows": []})
-
-
-def clear_slot_memory(paths: dict[str, Path]) -> None:
-    if paths["uploads"].exists():
-        shutil.rmtree(paths["uploads"])
-    if paths["context"].exists():
-        paths["context"].unlink()
-    if paths["eval"].exists():
-        paths["eval"].unlink()
-    context_cache.update({"path": None, "mtime": None, "rows": []})
+    for path in (CHAT_CONTEXT_FILE, EVAL_CONTEXT_FILE):
+        if path.exists():
+            path.unlink()
+    context_cache.update({"mtime": None, "rows": []})
 
 
 def unload_chat_model() -> None:
     with chat_lock:
         torch = chat_state.get("torch")
-        chat_state.update({"model": None, "tokenizer": None, "torch": None, "model_id": None, "adapter_dir": None})
+        chat_state.update({"model": None, "tokenizer": None, "torch": None, "adapter_dir": None})
         adapter_scale_state["value"] = None
         if torch is not None and torch.cuda.is_available():
             torch.cuda.empty_cache()
 
 
+def bool_form(name: str, default: bool = False) -> bool:
+    value = request.form.get(name)
+    if value is None:
+        return default
+    return value in {"1", "true", "on", "yes"}
+
+
+def set_child_env(child_env: dict[str, str], form_name: str, env_name: str, default: str = "") -> None:
+    value = request.form.get(form_name, "").strip()
+    if value or default:
+        child_env[env_name] = value or default
+
+
 def load_adapter_base_model(adapter_dir: Path) -> str:
     config_path = adapter_dir / "adapter_config.json"
     if not config_path.exists():
-        raise FileNotFoundError(f"Missing adapter config: {config_path}")
-
+        raise FileNotFoundError(f"No trained adapter found at {adapter_dir}")
     config = json.loads(config_path.read_text(encoding="utf-8"))
     base_model = config.get("base_model_name_or_path")
     if not base_model:
@@ -259,34 +192,19 @@ def load_adapter_base_model(adapter_dir: Path) -> str:
     return base_model
 
 
-def get_chat_model(model_id: str, adapter_dir: Path):
+def get_chat_model(adapter_dir: Path):
     adapter_dir = adapter_dir.resolve()
-    if (
-        chat_state["model"] is not None
-        and chat_state["tokenizer"] is not None
-        and chat_state.get("model_id") == model_id
-        and chat_state.get("adapter_dir") == str(adapter_dir)
-    ):
+    if chat_state["model"] is not None and chat_state.get("adapter_dir") == str(adapter_dir):
         return chat_state
 
     with chat_lock:
-        if (
-            chat_state["model"] is not None
-            and chat_state["tokenizer"] is not None
-            and chat_state.get("model_id") == model_id
-            and chat_state.get("adapter_dir") == str(adapter_dir)
-        ):
+        if chat_state["model"] is not None and chat_state.get("adapter_dir") == str(adapter_dir):
             return chat_state
-
-        if chat_state["model"] is not None or chat_state["tokenizer"] is not None:
-            torch = chat_state.get("torch")
-            chat_state.update({"model": None, "tokenizer": None, "torch": None, "model_id": None, "adapter_dir": None})
-            adapter_scale_state["value"] = None
-            if torch is not None and torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
-        if not adapter_dir.exists():
-            raise FileNotFoundError(f"Adapter folder does not exist: {adapter_dir}")
+        torch = chat_state.get("torch")
+        chat_state.update({"model": None, "tokenizer": None, "torch": None, "adapter_dir": None})
+        adapter_scale_state["value"] = None
+        if torch is not None and torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         import torch
         from peft import PeftModel
@@ -295,19 +213,10 @@ def get_chat_model(model_id: str, adapter_dir: Path):
         base_model = load_adapter_base_model(adapter_dir)
         cuda_available = torch.cuda.is_available()
         bf16_available = cuda_available and torch.cuda.is_bf16_supported()
-
-        try:
-            tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
-        except Exception as exc:
-            if "vocab" not in str(exc).lower() or "merges" not in str(exc).lower():
-                raise
-            tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True, use_fast=False)
+        tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
         tokenizer.pad_token = tokenizer.pad_token or tokenizer.eos_token
 
-        model_kwargs = {
-            "trust_remote_code": True,
-            "device_map": "auto",
-        }
+        model_kwargs = {"trust_remote_code": True, "device_map": "auto"}
         if cuda_available and os.environ.get("CHAT_USE_4BIT", "1") == "1":
             model_kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_4bit=True,
@@ -321,91 +230,46 @@ def get_chat_model(model_id: str, adapter_dir: Path):
         model = AutoModelForCausalLM.from_pretrained(base_model, **model_kwargs)
         model = PeftModel.from_pretrained(model, adapter_dir)
         model.eval()
-
-        if cuda_available:
-            offloaded_devices = {
-                str(device)
-                for device in getattr(model, "hf_device_map", {}).values()
-                if str(device) in {"cpu", "disk"}
-            }
-            if offloaded_devices:
-                chat_state.update({"model": None, "tokenizer": None, "torch": None, "model_id": None, "adapter_dir": None})
-                torch.cuda.empty_cache()
-                raise RuntimeError(
-                    "The adapter base model is still being offloaded to CPU/disk, so chat would be extremely slow. "
-                    "Use a smaller trained adapter/base model for chat, or keep CHAT_USE_4BIT=1 and retrain/select a model that fits in VRAM."
-                )
-
-        chat_state.update({
-            "model": model,
-            "tokenizer": tokenizer,
-            "torch": torch,
-            "model_id": model_id,
-            "adapter_dir": str(adapter_dir),
-        })
+        chat_state.update({"model": model, "tokenizer": tokenizer, "torch": torch, "adapter_dir": str(adapter_dir)})
         return chat_state
 
 
 def model_input_device(model):
-    hf_device_map = getattr(model, "hf_device_map", None) or {}
-    for device in hf_device_map.values():
-        device_text = str(device)
-        if device_text not in {"cpu", "disk", "meta"}:
-            return device_text
-
+    for device in (getattr(model, "hf_device_map", None) or {}).values():
+        if str(device) not in {"cpu", "disk", "meta"}:
+            return device
     for parameter in model.parameters():
         if parameter.device.type != "meta":
             return parameter.device
-
-    return "cuda:0" if chat_state.get("torch") is not None and chat_state["torch"].cuda.is_available() else "cpu"
-
-
-def blocked_token_ids(tokenizer):
-    blocked_tokens = [
-        token
-        for token in ["<|fim_prefix|>", "<|fim_middle|>", "<|fim_suffix|>", "<|fim_pad|>"]
-        if tokenizer.convert_tokens_to_ids(token) != tokenizer.unk_token_id
-    ]
-    return [tokenizer(token, add_special_tokens=False).input_ids for token in blocked_tokens]
-
-
-def adapter_scaling_items(model):
-    for module in model.modules():
-        scaling = getattr(module, "scaling", None)
-        if isinstance(scaling, dict):
-            for adapter_name, value in list(scaling.items()):
-                yield module, adapter_name, value
+    return "cpu"
 
 
 def set_adapter_scale(model, scale: float) -> None:
     scale = max(0.0, min(scale, 2.0))
-    current = adapter_scale_state.get("value")
-    if current == scale:
+    if adapter_scale_state.get("value") == scale:
         return
-
-    for module, adapter_name, value in adapter_scaling_items(model):
-        base_scaling = getattr(module, "_xavier_base_scaling", None)
-        if base_scaling is None:
-            base_scaling = {}
-            setattr(module, "_xavier_base_scaling", base_scaling)
-        if adapter_name not in base_scaling:
-            base_scaling[adapter_name] = value
-        module.scaling[adapter_name] = base_scaling[adapter_name] * scale
-
+    for module in model.modules():
+        scaling = getattr(module, "scaling", None)
+        if not isinstance(scaling, dict):
+            continue
+        base = getattr(module, "_base_scaling", None)
+        if base is None:
+            base = dict(scaling)
+            setattr(module, "_base_scaling", base)
+        for adapter_name, value in base.items():
+            module.scaling[adapter_name] = value * scale
     adapter_scale_state["value"] = scale
 
 
-def load_training_context(context_file: Path = CHAT_CONTEXT_FILE) -> list[dict[str, str]]:
-    if not context_file.exists():
+def load_training_context() -> list[dict[str, str]]:
+    if not CHAT_CONTEXT_FILE.exists():
         return []
-
-    context_file = context_file.resolve()
-    mtime = context_file.stat().st_mtime
-    if context_cache["path"] == str(context_file) and context_cache["mtime"] == mtime:
+    mtime = CHAT_CONTEXT_FILE.stat().st_mtime
+    if context_cache["mtime"] == mtime:
         return context_cache["rows"]
 
     rows = []
-    with context_file.open("r", encoding="utf-8") as handle:
+    with CHAT_CONTEXT_FILE.open("r", encoding="utf-8") as handle:
         for line in handle:
             try:
                 item = json.loads(line)
@@ -413,138 +277,32 @@ def load_training_context(context_file: Path = CHAT_CONTEXT_FILE) -> list[dict[s
                 continue
             if item.get("path") and item.get("text"):
                 rows.append({"path": item["path"], "chunk": item.get("chunk"), "text": item["text"]})
-
-    context_cache.update({"path": str(context_file), "mtime": mtime, "rows": rows})
+    context_cache.update({"mtime": mtime, "rows": rows})
     return rows
 
 
-def query_terms(message: str) -> set[str]:
-    return {
+def retrieve_context(message: str, limit: int, max_chars: int) -> tuple[str, list[str]]:
+    terms = {
         term.lower()
         for term in re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", message)
         if term.lower() not in {"the", "and", "for", "with", "that", "this", "from", "what", "how", "can"}
     }
-
-
-def is_generated_path(path: str) -> bool:
-    normalized = path.replace("\\", "/").lower()
-    if normalized in {"app.py", "train_model.py", "test_model.py"}:
-        return True
-
-    generated_parts = {
-        ".dart_tool",
-        "dart_tool",
-        ".gradle",
-        ".idea",
-        "idea",
-        "build",
-        "bin",
-        "obj",
-        "ephemeral",
-        "intermediates",
-        "cmakefiles",
-        "ds4windows_3.3.3_x64",
-    }
-    parts = {part.lower() for part in re.split(r"[\\/]+", normalized)}
-    return bool(generated_parts & parts)
-
-
-def clean_training_text(text: str) -> str:
-    marker = "\nPath: "
-    if marker in text:
-        _, rest = text.split(marker, 1)
-        if "\n\n" in rest:
-            _, content = rest.split("\n\n", 1)
-            return content
-
-    marker = "\n\nFile: "
-    if marker not in text:
-        return text
-
-    _, rest = text.split(marker, 1)
-    if "\n\n" not in rest:
-        return rest
-    _, code = rest.split("\n\n", 1)
-    return code
-
-
-def retrieve_context(message: str, context_file: Path = CHAT_CONTEXT_FILE, limit: int = 8, max_chars: int = 1200) -> tuple[str, list[str]]:
-    rows = load_training_context(context_file)
-    if not rows:
-        return "", []
-
-    terms = query_terms(message)
     scored = []
-    for row in rows:
-        if is_generated_path(row["path"]):
-            continue
-        clean_text = clean_training_text(row["text"])
-        haystack = f"{row['path']}\n{clean_text}".lower()
-        score = sum(haystack.count(term) for term in terms)
-        lower_path = row["path"].lower()
-        if lower_path.endswith(("pubspec.yaml", "package.json", "pyproject.toml", "requirements.txt")):
-            score += 5
-        if "/lib/" in lower_path or lower_path.startswith("lib/"):
-            score += 3
-        if score:
-            scored.append((score, row))
-
-    if not scored:
-        scored = [(1, row) for row in rows if not is_generated_path(row["path"])]
+    for row in load_training_context():
+        haystack = f"{row['path']}\n{row['text']}".lower()
+        score = sum(haystack.count(term) for term in terms) or 1
+        scored.append((score, row))
 
     snippets = []
     sources = []
     for _, row in sorted(scored, key=lambda item: item[0], reverse=True)[:limit]:
-        text = clean_training_text(row["text"])
-        if len(text) > max_chars:
-            text = text[:max_chars].rstrip() + "\n..."
+        text = row["text"][:max_chars].rstrip()
+        if len(row["text"]) > max_chars:
+            text += "\n..."
         source = f"{row['path']}#chunk-{row['chunk']}" if row.get("chunk") else row["path"]
         sources.append(source)
-        snippets.append(f"Memory source: {source}\n{text}")
-
+        snippets.append(f"Source: {source}\n{text}")
     return "\n\n---\n\n".join(snippets), sources
-
-
-def pack_chat_history(history: list[dict[str, str]], max_chars: int = 12000) -> list[dict[str, str]]:
-    packed = []
-    used_chars = 0
-
-    for item in reversed(history):
-        role = item.get("role")
-        content = (item.get("content") or "").strip()
-        if role not in {"user", "assistant"} or not content:
-            continue
-
-        cost = len(content) + len(role) + 8
-        if packed and used_chars + cost > max_chars:
-            break
-
-        packed.append({"role": role, "content": content})
-        used_chars += cost
-
-    return list(reversed(packed))
-
-
-def xavier_chat_messages(history: list[dict[str, str]], message: str, memory_context: str = "") -> list[dict[str, str]]:
-    messages = []
-    agent_instructions = current_agent_instructions()
-    if agent_instructions:
-        messages.append({"role": "system", "content": agent_instructions})
-    messages.extend(pack_chat_history(history))
-    if memory_context:
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    "Relevant uploaded data snippets. Use them only if they help answer the message.\n\n"
-                    f"{memory_context}\n\n"
-                    f"Message: {message}"
-                ),
-            }
-        )
-    else:
-        messages.append({"role": "user", "content": message})
-    return messages
 
 
 @app.route("/")
@@ -557,56 +315,16 @@ def ping():
     hf_token = env_hf_token()
     return jsonify({
         "ok": True,
-        "agent_instructions": env_agent_instructions(),
-        "hf_token": hf_token,
+        "storage_dir": str(STORAGE_DIR),
+        "adapter_ready": (ADAPTER_DIR / "adapter_config.json").exists(),
+        "agent_instructions": current_agent_instructions(),
+        "defaults": form_defaults(),
+        "env_files": {
+            ".env": (BASE_DIR / ".env").exists(),
+            ".env.example": (BASE_DIR / ".env.example").exists(),
+        },
         "has_hf_token": bool(hf_token),
         "hf_token_length": len(hf_token),
-    })
-
-
-@app.route("/models", methods=["GET"])
-def list_models():
-    return jsonify({"models": saved_model_blocks()})
-
-
-@app.route("/models/<model_id>", methods=["PATCH"])
-def rename_model(model_id: str):
-    model_id = slugify_model_id(model_id)
-    payload = request.get_json(silent=True) or {}
-    name = (payload.get("name") or "").strip()
-    if not name:
-        return jsonify({"error": "Name is required"}), 400
-
-    registry = load_model_registry()
-    if model_id != "current" and model_id not in registry:
-        return jsonify({"error": "Model block not found"}), 404
-
-    registry[model_id] = {"name": name}
-    save_model_registry(registry)
-    return jsonify({"model": {"id": model_id, "name": name}})
-
-
-@app.route("/models/import-current", methods=["POST"])
-def import_current_model():
-    payload = request.get_json(silent=True) or {}
-    name = (payload.get("name") or "Current adapter").strip()
-    if not (ADAPTER_DIR / "adapter_config.json").exists():
-        return jsonify({"error": f"No current adapter found at {ADAPTER_DIR}"}), 404
-
-    model_block = ensure_model_block(name)
-    paths = model_slot_paths(model_block["id"])
-    if paths["storage"].exists():
-        shutil.rmtree(paths["storage"])
-    paths["storage"].mkdir(parents=True, exist_ok=True)
-    shutil.copytree(ADAPTER_DIR, paths["adapter"])
-    if CHAT_CONTEXT_FILE.exists():
-        shutil.copy2(CHAT_CONTEXT_FILE, paths["context"])
-    if EVAL_CONTEXT_FILE.exists():
-        shutil.copy2(EVAL_CONTEXT_FILE, paths["eval"])
-
-    return jsonify({
-        "message": f"Saved current adapter as {model_block['name']}.",
-        "model": {"id": model_block["id"], "name": model_block["name"]},
     })
 
 
@@ -614,64 +332,9 @@ def import_current_model():
 def clear_memory_route():
     if training_process and training_process.poll() is None:
         return jsonify({"error": "Training is running. Stop it before clearing memory."}), 409
-
-    clear_memory()
-    return jsonify({"message": "Cleared uploaded text memory. The trained adapter was not deleted."})
-
-
-@app.route("/clear-project", methods=["POST"])
-def clear_project():
-    return clear_memory_route()
-
-
-@app.route("/chat", methods=["POST"])
-def chat():
-    if training_process and training_process.poll() is None:
-        return jsonify({"error": "Training is running. Stop or finish training before chatting."}), 409
-
-    payload = request.get_json(silent=True) or {}
-    message = (payload.get("message") or "").strip()
-    history = payload.get("history") or []
-    model_id = slugify_model_id(payload.get("model_block_id") or "current")
-    paths = model_slot_paths(model_id)
-    if not message:
-        return jsonify({"error": "Message is required"}), 400
-
-    try:
-        state = get_chat_model(model_id, paths["adapter"])
-        model = state["model"]
-        tokenizer = state["tokenizer"]
-        torch = state["torch"]
-        set_adapter_scale(model, float(payload.get("adapter_scale") or DEFAULT_ADAPTER_SCALE))
-
-        memory_context, sources = retrieve_context(message, paths["context"])
-        messages = xavier_chat_messages(history, message, memory_context)
-
-        text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = tokenizer(text, return_tensors="pt").to(model_input_device(model))
-        temperature = float(payload.get("temperature") or 0.7)
-        generation_args = {
-            **inputs,
-            "max_new_tokens": int(payload.get("max_new_tokens") or DEFAULT_CHAT_MAX_NEW_TOKENS),
-            "do_sample": temperature > 0,
-            "repetition_penalty": 1.15,
-            "no_repeat_ngram_size": 4,
-            "bad_words_ids": blocked_token_ids(tokenizer) or None,
-            "pad_token_id": tokenizer.eos_token_id,
-        }
-        if temperature > 0:
-            generation_args["temperature"] = temperature
-            generation_args["top_p"] = float(payload.get("top_p") or 0.9)
-
-        with chat_lock:
-            with torch.no_grad():
-                generated = model.generate(**generation_args)
-
-        new_tokens = generated[0][inputs["input_ids"].shape[-1] :]
-        reply = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-        return jsonify({"reply": reply, "used_context": bool(memory_context), "sources": sources})
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+    unload_chat_model()
+    clear_training_inputs()
+    return jsonify({"message": "Cleared uploaded files and generated datasets. Adapter files were left alone."})
 
 
 @app.route("/train", methods=["POST"])
@@ -681,37 +344,20 @@ def train():
     if training_process and training_process.poll() is None:
         return jsonify({"error": "Training is already running"}), 409
 
-    file_groups = [
-        ("personality", request.files.getlist("personality_files")),
-        ("general", request.files.getlist("general_files")),
-        ("general", request.files.getlist("files")),
-    ]
-    if not any(files for _, files in file_groups):
+    uploaded_files = request.files.getlist("files")
+    if not uploaded_files:
         return jsonify({"error": "No files uploaded"}), 400
 
-    model_path = request.form.get("model_path", "").strip()
-    if model_path in INFERENCE_ONLY_MODELS:
-        return jsonify({"error": f"{model_path} is not practical for local QLoRA training on this GPU. Choose 7B, 3B, 1.5B, 0.5B, or a local custom model."}), 400
-
-    model_block_id = request.form.get("model_block_id", "").strip()
-    model_block_name = request.form.get("model_block_name", "").strip()
-    model_block = ensure_model_block(model_block_name or "New model", model_block_id) if model_block_id or model_block_name else None
-    slot_paths = model_slot_paths(model_block["id"]) if model_block else model_slot_paths("current")
-
-    clear_slot_memory(slot_paths)
-    slot_paths["uploads"].mkdir(parents=True, exist_ok=True)
+    clear_training_inputs()
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     saved_count = 0
-
-    for group_name, files in file_groups:
-        group_dir = slot_paths["uploads"] / group_name
-        for uploaded_file in files:
-            if not uploaded_file.filename:
-                continue
-
-            file_path = safe_upload_path(uploaded_file.filename, group_dir)
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            uploaded_file.save(file_path)
-            saved_count += 1
+    for uploaded_file in uploaded_files:
+        if not uploaded_file.filename:
+            continue
+        file_path = safe_upload_path(uploaded_file.filename)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        uploaded_file.save(file_path)
+        saved_count += 1
 
     if saved_count == 0:
         return jsonify({"error": "No valid files uploaded"}), 400
@@ -719,70 +365,53 @@ def train():
     unload_chat_model()
 
     child_env = os.environ.copy()
-    child_env["TRAIN_STORAGE_DIR"] = str(slot_paths["storage"])
-    agent_instructions = request.form.get("agent_instructions", "").strip()
-    AGENT_INSTRUCTIONS_FILE.write_text(agent_instructions, encoding="utf-8")
-    child_env["AGENT_INSTRUCTIONS"] = agent_instructions
+    child_env["TRAIN_STORAGE_DIR"] = str(STORAGE_DIR)
+    child_env["TRAIN_OUTPUT_DIR"] = str(ADAPTER_DIR)
+    child_env["AGENT_INSTRUCTIONS"] = request.form.get("agent_instructions", "").strip()
+    AGENT_INSTRUCTIONS_FILE.write_text(child_env["AGENT_INSTRUCTIONS"], encoding="utf-8")
 
-    assistant_speaker_name = request.form.get("assistant_speaker_name", "").strip()
-    child_env["ASSISTANT_SPEAKER_NAME"] = assistant_speaker_name
-    child_env["PERSONALITY_WEIGHT"] = request.form.get("personality_weight", "40").strip() or "40"
-    child_env["GENERAL_WEIGHT"] = request.form.get("general_weight", "60").strip() or "60"
-    child_env["CHAT_CONTEXT_MIN"] = request.form.get("chat_context_min", "1").strip() or "1"
-    child_env["CHAT_CONTEXT_MAX"] = request.form.get("chat_context_max", "15").strip() or "15"
+    controls = {
+        "model_path": ("QWEN_MODEL_PATH", "Qwen/Qwen2.5-3B-Instruct"),
+        "assistant_speaker_name": ("ASSISTANT_SPEAKER_NAME", ""),
+        "chat_context_min": ("CHAT_CONTEXT_MIN", "1"),
+        "chat_context_max": ("CHAT_CONTEXT_MAX", "15"),
+        "data_mode": ("DATA_MODE", "auto"),
+        "dataset_seed": ("DATASET_SEED", "42"),
+        "eval_ratio": ("EVAL_RATIO", "0.08"),
+        "max_file_bytes": ("MAX_FILE_BYTES", "200000"),
+        "max_conversation_bytes": ("MAX_CONVERSATION_BYTES", str(5 * 1024 * 1024)),
+        "chunk_chars": ("CHUNK_CHARS", "3500"),
+        "chunk_overlap": ("CHUNK_OVERLAP", "500"),
+        "max_length": ("MAX_LENGTH", "1024"),
+        "batch_size": ("BATCH_SIZE", "1"),
+        "grad_accum_steps": ("GRAD_ACCUM_STEPS", "16"),
+        "epochs": ("EPOCHS", "1"),
+        "max_steps": ("MAX_STEPS", ""),
+        "learning_rate": ("LEARNING_RATE", "5e-5"),
+        "optim": ("OPTIM", ""),
+        "lora_rank": ("LORA_R", "16"),
+        "lora_alpha": ("LORA_ALPHA", "16"),
+        "lora_dropout": ("LORA_DROPOUT", "0.05"),
+        "lora_target_mode": ("LORA_TARGET_MODE", "all"),
+        "lora_target_modules": ("LORA_TARGET_MODULES", ""),
+    }
+    for form_name, (env_name, default) in controls.items():
+        set_child_env(child_env, form_name, env_name, default)
+
+    child_env["ALLOW_MODEL_DOWNLOAD"] = "1" if bool_form("allow_model_download", True) else "0"
+    child_env["USE_QLORA"] = "1" if bool_form("use_qlora", True) else "0"
+    child_env["GPU_TRAIN"] = "1" if bool_form("gpu_train", True) else "0"
+    child_env["FILTER_LOW_VALUE_REPLIES"] = "1" if bool_form("filter_low_value_replies", True) else "0"
+    child_env["KEEP_SHORT_REPLIES"] = "1" if bool_form("keep_short_replies", True) else "0"
+    child_env.setdefault("HF_HUB_DISABLE_XET", "1")
+    child_env.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")
+    child_env.setdefault("HF_HUB_ETAG_TIMEOUT", "60")
+    child_env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
     hf_token = request.form.get("hf_token", "").strip()
     if hf_token:
         child_env["HF_TOKEN"] = hf_token
         child_env["HUGGING_FACE_HUB_TOKEN"] = hf_token
-    elif child_env.get("HF_TOKEN"):
-        child_env["HUGGING_FACE_HUB_TOKEN"] = child_env["HF_TOKEN"]
-    elif child_env.get("HUGGING_FACE_HUB_TOKEN"):
-        child_env["HF_TOKEN"] = child_env["HUGGING_FACE_HUB_TOKEN"]
-
-    if model_path:
-        child_env["QWEN_MODEL_PATH"] = model_path
-        if request.form.get("allow_model_download") == "1" and "/" in model_path:
-            child_env["ALLOW_MODEL_DOWNLOAD"] = "1"
-    elif request.form.get("allow_model_download") == "1":
-        child_env["QWEN_MODEL_PATH"] = DEFAULT_TRAIN_MODEL
-        child_env["ALLOW_MODEL_DOWNLOAD"] = "1"
-    child_env["TRAIN_OUTPUT_DIR"] = str(slot_paths["adapter"])
-
-    child_env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-    child_env.setdefault("HF_HUB_DISABLE_XET", "1")
-    child_env.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")
-    child_env.setdefault("HF_HUB_ETAG_TIMEOUT", "60")
-    child_env.setdefault("USE_QLORA", "1")
-    child_env.setdefault("LORA_TARGET_MODE", "all")
-
-    if request.form.get("quick_train") == "1":
-        child_env["QUICK_TRAIN"] = "1"
-        child_env["MAX_STEPS"] = "5"
-        child_env["MAX_LENGTH"] = "256"
-        child_env["LORA_R"] = "4"
-        child_env["LORA_ALPHA"] = "8"
-        child_env["GRAD_ACCUM_STEPS"] = "1"
-        child_env["EPOCHS"] = "1"
-
-    if request.form.get("gpu_train") == "1" and request.form.get("quick_train") != "1":
-        child_env["GPU_TRAIN"] = "1"
-        child_env["MAX_LENGTH"] = request.form.get("max_length", "").strip() or child_env.get("MAX_LENGTH", "1024")
-        child_env.setdefault("BATCH_SIZE", "1")
-        child_env.setdefault("GRAD_ACCUM_STEPS", "16")
-        child_env["LORA_R"] = request.form.get("lora_rank", "").strip() or child_env.get("LORA_R", "16")
-        child_env["LORA_ALPHA"] = request.form.get("lora_alpha", "").strip() or child_env.get("LORA_ALPHA", child_env["LORA_R"])
-        child_env.setdefault("LORA_DROPOUT", "0.05")
-        child_env["LEARNING_RATE"] = request.form.get("learning_rate", "").strip() or child_env.get("LEARNING_RATE", "5e-5")
-        child_env["EPOCHS"] = request.form.get("epochs", "").strip() or child_env.get("EPOCHS", "1")
-    elif request.form.get("gpu_train") == "1":
-        child_env["GPU_TRAIN"] = "1"
-    elif request.form.get("quick_train") != "1":
-        child_env["MAX_LENGTH"] = request.form.get("max_length", "").strip() or child_env.get("MAX_LENGTH", "1536")
-        child_env["LORA_R"] = request.form.get("lora_rank", "").strip() or child_env.get("LORA_R", "16")
-        child_env["LORA_ALPHA"] = request.form.get("lora_alpha", "").strip() or child_env.get("LORA_ALPHA", child_env["LORA_R"])
-        child_env["LEARNING_RATE"] = request.form.get("learning_rate", "").strip() or child_env.get("LEARNING_RATE", "5e-5")
-        child_env["EPOCHS"] = request.form.get("epochs", "").strip() or child_env.get("EPOCHS", "1")
 
     log_handle = LOG_FILE.open("w", encoding="utf-8")
     training_process = subprocess.Popen(
@@ -795,26 +424,20 @@ def train():
     )
     log_handle.close()
 
-    response_payload = {"message": "Training started", "files": saved_count}
-    if model_block:
-        response_payload["model_block"] = {"id": model_block["id"], "name": model_block["name"]}
-    return jsonify(response_payload)
+    return jsonify({"message": "Training started", "files": saved_count})
 
 
 @app.route("/stop", methods=["POST"])
 def stop():
     global training_process
-
     if not training_process or training_process.poll() is not None:
         return jsonify({"message": "No training process is running"})
-
     training_process.terminate()
     try:
         training_process.wait(timeout=10)
     except subprocess.TimeoutExpired:
         training_process.kill()
         training_process.wait(timeout=10)
-
     return jsonify({"message": "Training stopped"})
 
 
@@ -823,7 +446,70 @@ def status():
     running = training_process is not None and training_process.poll() is None
     exit_code = None if running or training_process is None else training_process.returncode
     log = LOG_FILE.read_text(encoding="utf-8", errors="replace") if LOG_FILE.exists() else ""
-    return jsonify({"running": running, "exit_code": exit_code, "log": log[-8000:], "storage_dir": str(STORAGE_DIR)})
+    return jsonify({
+        "running": running,
+        "exit_code": exit_code,
+        "log": log[-10000:],
+        "storage_dir": str(STORAGE_DIR),
+        "adapter_ready": (ADAPTER_DIR / "adapter_config.json").exists(),
+    })
+
+
+@app.route("/chat", methods=["POST"])
+def chat():
+    if training_process and training_process.poll() is None:
+        return jsonify({"error": "Training is running. Stop or finish training before chatting."}), 409
+
+    payload = request.get_json(silent=True) or {}
+    message = (payload.get("message") or "").strip()
+    if not message:
+        return jsonify({"error": "Message is required"}), 400
+
+    try:
+        state = get_chat_model(ADAPTER_DIR)
+        model = state["model"]
+        tokenizer = state["tokenizer"]
+        torch = state["torch"]
+        set_adapter_scale(model, float(payload.get("adapter_scale") or 1.0))
+
+        memory_context, sources = retrieve_context(
+            message,
+            int(payload.get("context_limit") or 6),
+            int(payload.get("context_chars") or 1000),
+        )
+        messages = []
+        instructions = current_agent_instructions()
+        if instructions:
+            messages.append({"role": "system", "content": instructions})
+        for item in payload.get("history") or []:
+            if item.get("role") in {"user", "assistant"} and item.get("content"):
+                messages.append({"role": item["role"], "content": item["content"]})
+        if memory_context:
+            messages.append({"role": "user", "content": f"Relevant training data:\n\n{memory_context}\n\nMessage: {message}"})
+        else:
+            messages.append({"role": "user", "content": message})
+
+        text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = tokenizer(text, return_tensors="pt").to(model_input_device(model))
+        temperature = float(payload.get("temperature") or 0.7)
+        args = {
+            **inputs,
+            "max_new_tokens": int(payload.get("max_new_tokens") or 160),
+            "do_sample": temperature > 0,
+            "repetition_penalty": float(payload.get("repetition_penalty") or 1.1),
+            "pad_token_id": tokenizer.eos_token_id,
+        }
+        if temperature > 0:
+            args["temperature"] = temperature
+            args["top_p"] = float(payload.get("top_p") or 0.9)
+
+        with chat_lock:
+            with torch.no_grad():
+                generated = model.generate(**args)
+        reply = tokenizer.decode(generated[0][inputs["input_ids"].shape[-1] :], skip_special_tokens=True).strip()
+        return jsonify({"reply": reply, "used_context": bool(memory_context), "sources": sources})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 if __name__ == "__main__":

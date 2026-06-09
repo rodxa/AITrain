@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -66,43 +66,17 @@ MAX_CONVERSATION_BYTES = int(os.environ.get("MAX_CONVERSATION_BYTES", str(5 * 10
 CHUNK_CHARS = int(os.environ.get("CHUNK_CHARS", "3500"))
 CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "500"))
 ASSISTANT_SPEAKER_NAME = os.environ.get("ASSISTANT_SPEAKER_NAME", "").strip()
-DEFAULT_AGENT_INSTRUCTIONS = ""
-AGENT_INSTRUCTIONS = os.environ.get("AGENT_INSTRUCTIONS", DEFAULT_AGENT_INSTRUCTIONS)
+AGENT_INSTRUCTIONS = os.environ.get("AGENT_INSTRUCTIONS", "").strip()
 CONTEXT_MIN_MESSAGES = int(os.environ.get("CHAT_CONTEXT_MIN", os.environ.get("WHATSAPP_CONTEXT_MIN", "1")))
 CONTEXT_MAX_MESSAGES = int(os.environ.get("CHAT_CONTEXT_MAX", os.environ.get("WHATSAPP_CONTEXT_MAX", "15")))
-STYLE_RATIO = 0.0
 EVAL_RATIO = float(os.environ.get("EVAL_RATIO", "0.08"))
 DATASET_SEED = int(os.environ.get("DATASET_SEED", "42"))
-MAX_STYLE_EXAMPLES = 0
-HELPFUL_DATA_FILE = ""
-PERSONALITY_WEIGHT = max(0, int(os.environ.get("PERSONALITY_WEIGHT", "40")))
-GENERAL_WEIGHT = max(0, int(os.environ.get("GENERAL_WEIGHT", "60")))
+DATA_MODE = os.environ.get("DATA_MODE", "auto").lower()
+FILTER_LOW_VALUE_REPLIES = os.environ.get("FILTER_LOW_VALUE_REPLIES", "1") == "1"
+KEEP_SHORT_TARGETS = os.environ.get("KEEP_SHORT_REPLIES", "1") == "1"
 LORA_TARGET_MODE = os.environ.get("LORA_TARGET_MODE", "all").lower()
-XAVIER_SYSTEM_PROMPT = (
-    "You are Xavier. You answer helpfully, but your tone is casual, slightly chaotic, short, "
-    "and WhatsApp-like. Use words like lol, lel, düd, wtf, ok, damn, nah, ye sometimes. "
-    "Do not sound formal. Still answer the question properly."
-)
-BASE_PRESERVATION_NOTE = (
-    "Keep the base model's general reasoning, coding, and explanation ability. "
-    "The LoRA should add Xavier's tone and small personal preferences, not replace the model's knowledge."
-)
-STYLE_SYSTEM_PROMPT = XAVIER_SYSTEM_PROMPT
-HELPFUL_SYSTEM_PROMPT = XAVIER_SYSTEM_PROMPT
-XAVIER_SYSTEM_PROMPT = (
-    "You are Xavier's local coding agent. Code professionally first: inspect the problem, give correct "
-    "solutions, and avoid inventing facts. Your tone is casual and Xavier-like, with occasional lol, lel, "
-    "dud, wtf, ok, damn, nah, or ye when it fits. Keep slang light during coding tasks."
-)
-CODING_SYSTEM_PROMPT = (
-    "You are a senior local coding agent based on Qwen Coder. Solve programming tasks accurately, "
-    "preserve the base model's coding ability, explain tradeoffs briefly, and write clean code."
-)
-XAVIER_SYSTEM_PROMPT = AGENT_INSTRUCTIONS
-CODING_SYSTEM_PROMPT = AGENT_INSTRUCTIONS
-BASE_PRESERVATION_NOTE = ""
-STYLE_SYSTEM_PROMPT = XAVIER_SYSTEM_PROMPT
-HELPFUL_SYSTEM_PROMPT = CODING_SYSTEM_PROMPT
+STYLE_SYSTEM_PROMPT = AGENT_INSTRUCTIONS
+HELPFUL_SYSTEM_PROMPT = AGENT_INSTRUCTIONS
 USELESS_REPLY_EXACT = {
     "",
     "?",
@@ -116,7 +90,7 @@ USELESS_REPLY_EXACT = {
     "ahah",
     "hahaha",
 }
-KEEP_SHORT_REPLIES = {"lol", "lel", "düd", "dud", "wtf", "ye", "yes", "nah", "no", "ok wait", "damn", "lmao", "lmfao"}
+KEEP_SHORT_REPLIES = {"lol", "lel", "dÃ¼d", "dud", "wtf", "ye", "yes", "nah", "no", "ok wait", "damn", "lmao", "lmfao"}
 MEDIA_OR_DELETED_PATTERNS = [
     "media omitted",
     "image omitted",
@@ -132,7 +106,7 @@ MEDIA_OR_DELETED_PATTERNS = [
 URL_ONLY_RE = re.compile(r"^(?:https?://|www\.)\S+$", re.IGNORECASE)
 WHATSAPP_LINE_RES = [
     re.compile(
-        r"^\[?\d{1,2}[/-]\d{1,2}[/-]\d{2,4},?\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s?[AP]M)?\]?\s*[-–]\s*(?P<speaker>[^:]+):\s*(?P<text>.*)$",
+        r"^\[?\d{1,2}[/-]\d{1,2}[/-]\d{2,4},?\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s?[AP]M)?\]?\s*[-â€“]\s*(?P<speaker>[^:]+):\s*(?P<text>.*)$",
         re.IGNORECASE,
     ),
     re.compile(
@@ -250,6 +224,8 @@ def is_bad_message(text: str) -> bool:
 
 
 def is_useless_target_reply(text: str) -> bool:
+    if not FILTER_LOW_VALUE_REPLIES:
+        return False
     normalized = clean_message_text(text).lower().strip(" .,!;:-_")
     if normalized in USELESS_REPLY_EXACT:
         return True
@@ -259,6 +235,8 @@ def is_useless_target_reply(text: str) -> bool:
 
 
 def is_kept_short_reply(text: str) -> bool:
+    if not KEEP_SHORT_TARGETS:
+        return False
     normalized = clean_message_text(text).lower().strip(" .,!;:-_")
     return normalized in KEEP_SHORT_REPLIES
 
@@ -405,6 +383,9 @@ def build_style_examples_from_messages(path: str, messages: list[dict[str, str]]
 
 
 def build_reply_examples(path: str, content: str, suffix: str, source_kind: str) -> list[dict]:
+    if DATA_MODE == "context":
+        return []
+
     messages: list[dict[str, str]] = []
     if suffix in {".json", ".jsonl"}:
         messages = parse_json_chat_messages(content)
@@ -460,7 +441,7 @@ def legacy_helpful_examples_unused() -> list[dict]:
         ),
         (
             "How should I train a style LoRA without making the model useless?",
-            "Mix mostly helpful instruction data with a smaller amount of style data. For your case, 70% helpful examples and 30% Xavier chat style is a good starting point. Keep 1-2 epochs, low LR like `5e-5` to `1e-4`, LoRA rank `8` or `16`, and remove target replies that are only `ok`, `lol`, `?`, links, deleted messages, or media placeholders. The model should learn the vibe without forgetting how to answer, düd.",
+            "Mix mostly helpful instruction data with a smaller amount of style data. For your case, 70% helpful examples and 30% Xavier chat style is a good starting point. Keep 1-2 epochs, low LR like `5e-5` to `1e-4`, LoRA rank `8` or `16`, and remove target replies that are only `ok`, `lol`, `?`, links, deleted messages, or media placeholders. The model should learn the vibe without forgetting how to answer, dÃ¼d.",
         ),
         (
             "What is overfitting in fine-tuning?",
@@ -468,7 +449,7 @@ def legacy_helpful_examples_unused() -> list[dict]:
         ),
         (
             "Give me a quick checklist for debugging a Python script that crashes.",
-            "Start with the exact traceback, then find the first line that belongs to your code. Print or inspect the values going into that line, check types, check missing files/env vars, and try the smallest input that still breaks. Once you fix it, add a tiny test so it doesn't come back, düd.",
+            "Start with the exact traceback, then find the first line that belongs to your code. Print or inspect the values going into that line, check types, check missing files/env vars, and try the smallest input that still breaks. Once you fix it, add a tiny test so it doesn't come back, dÃ¼d.",
         ),
         (
             "How do I make a LoRA sound like me without copying my private chats too hard?",
@@ -581,7 +562,7 @@ def helpful_examples() -> list[dict]:
         ),
         (
             "How should I train a style LoRA without making the model useless?",
-            "go 50/50 or 60/40 style/helpful, not tiny style crumbs.\n\n1 epoch, low LR like `5e-5` to `1e-4`, LoRA `r=8` or `16`. keep short replies only with context, remove media/deleted/link-only trash. rewrite helpful answers in your tone too, düd",
+            "go 50/50 or 60/40 style/helpful, not tiny style crumbs.\n\n1 epoch, low LR like `5e-5` to `1e-4`, LoRA `r=8` or `16`. keep short replies only with context, remove media/deleted/link-only trash. rewrite helpful answers in your tone too, dÃ¼d",
         ),
         (
             "What is overfitting in fine-tuning?",
@@ -609,7 +590,7 @@ def helpful_examples() -> list[dict]:
         ),
         (
             "What is the difference between base model and adapter?",
-            "base model = big original brain.\n\nadapter = small LoRA add-on with your style/task.\n\nfor chat you load base first, then adapter on top. adapter alone is not the full model, düd",
+            "base model = big original brain.\n\nadapter = small LoRA add-on with your style/task.\n\nfor chat you load base first, then adapter on top. adapter alone is not the full model, dÃ¼d",
         ),
         (
             "How can I stop my fine-tuned model from repeating the prompt?",
@@ -752,26 +733,8 @@ def split_eval_rows(rows: list[dict]) -> tuple[list[dict], list[dict]]:
     return shuffled[eval_count:], shuffled[:eval_count]
 
 
-def repeat_rows_for_weight(rows: list[dict], weight: int) -> list[dict]:
-    if not rows or weight <= 0:
-        return []
-    repeats = max(1, round(weight / 10))
-    weighted_rows = []
-    for repeat_index in range(repeats):
-        for row in rows:
-            item = dict(row)
-            item["weight_repeat"] = repeat_index + 1
-            weighted_rows.append(item)
-    return weighted_rows
-
-
 def mix_data_lanes(personality_rows: list[dict], general_rows: list[dict]) -> list[dict]:
-    weighted_rows = [
-        *repeat_rows_for_weight(personality_rows, PERSONALITY_WEIGHT),
-        *repeat_rows_for_weight(general_rows, GENERAL_WEIGHT),
-    ]
-    if not weighted_rows:
-        weighted_rows = [*personality_rows, *general_rows]
+    weighted_rows = [*personality_rows, *general_rows]
 
     rng = random.Random(DATASET_SEED)
     rng.shuffle(weighted_rows)
@@ -863,7 +826,8 @@ def build_dataset() -> tuple[list[dict], list[dict]]:
         reply_examples = build_reply_examples(relative_path, content, path.suffix.lower(), source_kind)
         if reply_examples:
             target_rows.extend(reply_examples)
-            continue
+            if DATA_MODE == "chat":
+                continue
 
         content = normalize_training_content(path, content)
         if not content or not content.strip():
@@ -916,8 +880,8 @@ def build_dataset() -> tuple[list[dict], list[dict]]:
     general_count = sum(1 for row in rows if str(row.get("source", "")).startswith("general_"))
     print(
         f"Built {len(train_rows)} train and {len(eval_rows)} eval examples "
-        f"({personality_count} weighted personality, {general_count} weighted general; "
-        f"priority personality={PERSONALITY_WEIGHT}, general={GENERAL_WEIGHT})",
+        f"({personality_count} conversation-style, {general_count} context/general; "
+        f"data_mode={DATA_MODE}, seed={DATASET_SEED})",
         flush=True,
     )
     return train_rows, eval_rows
@@ -1273,3 +1237,4 @@ if __name__ == "__main__":
     except Exception as exc:
         print(f"Training failed: {exc}", file=sys.stderr, flush=True)
         sys.exit(1)
+
