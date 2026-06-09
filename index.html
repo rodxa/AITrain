@@ -210,10 +210,42 @@
         }
 
         .chat {
+            position: sticky;
+            top: 20px;
             display: grid;
             grid-template-rows: auto minmax(220px, 1fr) auto;
-            height: min(760px, calc(100dvh - 40px));
+            height: var(--chat-height, min(820px, calc(100dvh - 40px)));
+            min-height: 560px;
+            max-height: calc(100dvh - 40px);
+            overflow: hidden;
             padding: 14px;
+        }
+
+        .chat-header {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: start;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .chat-header-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .icon-button {
+            display: inline-grid;
+            place-items: center;
+            width: 38px;
+            min-width: 38px;
+            min-height: 38px;
+            padding: 0;
+            border-color: var(--line);
+            background: #2b3442;
+            font-size: 16px;
         }
 
         .chat-log {
@@ -221,8 +253,8 @@
             align-content: start;
             gap: 10px;
             overflow: auto;
-            margin: 12px 0;
-            padding-right: 4px;
+            margin: 0;
+            padding: 12px 4px 12px 0;
         }
 
         .message {
@@ -239,9 +271,159 @@
         .message.user { justify-self: end; background: #2563eb; }
         .message.assistant { justify-self: start; background: var(--panel-2); }
 
+        .message.typing {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            width: auto;
+            min-width: 58px;
+            color: var(--muted);
+        }
+
+        .typing-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 999px;
+            background: currentColor;
+            opacity: 0.42;
+            animation: typingPulse 1.1s ease-in-out infinite;
+        }
+
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.14s;
+        }
+
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.28s;
+        }
+
+        @keyframes typingPulse {
+            0%, 70%, 100% {
+                transform: translateY(0);
+                opacity: 0.35;
+            }
+
+            35% {
+                transform: translateY(-4px);
+                opacity: 1;
+            }
+        }
+
         .chat-controls {
             display: grid;
             gap: 10px;
+            padding-top: 12px;
+            border-top: 1px solid var(--line);
+        }
+
+        .composer {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: stretch;
+        }
+
+        #chatInput {
+            min-height: 96px;
+            max-height: 180px;
+            resize: vertical;
+        }
+
+        .composer-actions {
+            display: grid;
+            gap: 8px;
+            align-content: start;
+        }
+
+        .send-button {
+            min-width: 82px;
+            min-height: 48px;
+            background: #2563eb;
+        }
+
+        details.chat-settings {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--field);
+        }
+
+        details.chat-settings summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            min-height: 42px;
+            padding: 10px 11px;
+            cursor: pointer;
+            color: #e8edf5;
+            font-size: 13px;
+            font-weight: 900;
+            list-style: none;
+        }
+
+        details.chat-settings summary::-webkit-details-marker {
+            display: none;
+        }
+
+        details.chat-settings summary::after {
+            content: "+";
+            color: var(--accent);
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        details.chat-settings[open] summary::after {
+            content: "-";
+        }
+
+        .chat-settings-body {
+            display: grid;
+            gap: 12px;
+            padding: 0 11px 11px;
+        }
+
+        .control-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 68px;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .control-row label {
+            gap: 6px;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            accent-color: var(--accent);
+        }
+
+        .value-pill {
+            min-height: 32px;
+            padding: 7px 8px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel-2);
+            color: #dff5ff;
+            font-size: 12px;
+            font-weight: 900;
+            text-align: center;
+        }
+
+        .chat-resize {
+            height: 12px;
+            margin: 2px 70px -8px;
+            border: 0;
+            border-radius: 999px;
+            padding: 0;
+            background: rgba(157, 167, 183, 0.26);
+            cursor: ns-resize;
+        }
+
+        .chat-resize:hover,
+        .chat-resize:focus-visible {
+            background: var(--accent);
+            outline: none;
         }
 
         .log-panel {
@@ -277,6 +459,10 @@
             header, .layout, .grid, .grid-3, .toggle-row { grid-template-columns: 1fr; }
             .status-bar { justify-content: flex-start; }
             .chat { height: 640px; }
+            .chat { position: static; max-height: none; }
+            .composer { grid-template-columns: 1fr; }
+            .composer-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .chat-resize { display: none; }
         }
 
         @media (max-width: 620px) {
@@ -412,6 +598,8 @@
                 <p class="small" id="status">Idle</p>
             </form>
 
+            <br>
+
             <div class="log-panel">
                 <h2>Training Log</h2>
                 <pre id="log"></pre>
@@ -420,25 +608,59 @@
 
         <aside class="side">
             <div class="chat">
-                <div>
-                    <h2>Test Adapter</h2>
-                    <p class="small" id="chatStatus">Ready when an adapter exists.</p>
+                <div class="chat-header">
+                    <div>
+                        <h2>Test Adapter</h2>
+                        <p class="small" id="chatStatus">Ready when an adapter exists.</p>
+                    </div>
+                    <div class="chat-header-actions">
+                        <button id="clearChatButton" type="button" class="icon-button" title="Clear chat">×</button>
+                    </div>
                 </div>
                 <div class="chat-log" id="chatLog"></div>
                 <div class="chat-controls">
-                    <textarea id="chatInput" placeholder="Message the trained adapter"></textarea>
-                    <div class="grid">
-                        <label>Max tokens <input id="chatMaxTokens" type="number" value="160"></label>
-                        <label>Temperature <input id="chatTemperature" type="text" value="0.7"></label>
-                        <label>Top-p <input id="chatTopP" type="text" value="0.9"></label>
-                        <label>Adapter scale <input id="adapterScale" type="text" value="1.0"></label>
-                        <label>Context snippets <input id="contextLimit" type="number" value="6"></label>
-                        <label>Snippet chars <input id="contextChars" type="number" value="1000"></label>
+                    <div class="composer">
+                        <textarea id="chatInput" placeholder="Message the trained adapter"></textarea>
+                        <div class="composer-actions">
+                            <button id="sendChatButton" type="button" class="send-button">Send</button>
+                            <button id="resetChatControlsButton" type="button" class="secondary">Reset</button>
+                        </div>
                     </div>
-                    <div class="actions">
-                        <button id="sendChatButton" type="button">Send</button>
-                        <button id="clearChatButton" type="button" class="secondary">Clear Chat</button>
-                    </div>
+                    <details class="chat-settings" open>
+                        <summary>Generation</summary>
+                        <div class="chat-settings-body">
+                            <div class="control-row">
+                                <label>Max tokens <input id="chatMaxTokens" type="range" min="32" max="1024" step="16" value="160" data-output="chatMaxTokensValue"></label>
+                                <span class="value-pill" id="chatMaxTokensValue">160</span>
+                            </div>
+                            <div class="control-row">
+                                <label>Temperature <input id="chatTemperature" type="range" min="0" max="1.5" step="0.05" value="0.7" data-output="chatTemperatureValue"></label>
+                                <span class="value-pill" id="chatTemperatureValue">0.70</span>
+                            </div>
+                            <div class="control-row">
+                                <label>Top-p <input id="chatTopP" type="range" min="0.1" max="1" step="0.05" value="0.9" data-output="chatTopPValue"></label>
+                                <span class="value-pill" id="chatTopPValue">0.90</span>
+                            </div>
+                            <div class="control-row">
+                                <label>Adapter scale <input id="adapterScale" type="range" min="0" max="2" step="0.05" value="1.0" data-output="adapterScaleValue"></label>
+                                <span class="value-pill" id="adapterScaleValue">1.00</span>
+                            </div>
+                        </div>
+                    </details>
+                    <details class="chat-settings">
+                        <summary>Training Context</summary>
+                        <div class="chat-settings-body">
+                            <div class="control-row">
+                                <label>Snippets <input id="contextLimit" type="range" min="0" max="16" step="1" value="6" data-output="contextLimitValue"></label>
+                                <span class="value-pill" id="contextLimitValue">6</span>
+                            </div>
+                            <div class="control-row">
+                                <label>Snippet chars <input id="contextChars" type="range" min="200" max="4000" step="100" value="1000" data-output="contextCharsValue"></label>
+                                <span class="value-pill" id="contextCharsValue">1000</span>
+                            </div>
+                        </div>
+                    </details>
+                    <button id="chatResize" type="button" class="chat-resize" title="Drag to resize chat"></button>
                 </div>
             </div>
         </aside>
@@ -464,6 +686,8 @@
     const chatLog = document.getElementById('chatLog');
     const chatInput = document.getElementById('chatInput');
     const chatStatus = document.getElementById('chatStatus');
+    const chatPanel = document.querySelector('.chat');
+    const chatResize = document.getElementById('chatResize');
     let pollTimer = null;
     let chatHistory = [];
 
@@ -473,11 +697,17 @@
     refreshButton.addEventListener('click', pollStatus);
     document.getElementById('sendChatButton').addEventListener('click', sendChat);
     document.getElementById('clearChatButton').addEventListener('click', clearChat);
+    document.getElementById('resetChatControlsButton').addEventListener('click', resetChatControls);
     chatInput.addEventListener('keydown', event => {
-        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
             sendChat();
         }
     });
+    for (const input of document.querySelectorAll('.chat-settings input[type="range"]')) {
+        input.addEventListener('input', updateChatControlReadouts);
+    }
+    chatResize.addEventListener('pointerdown', startChatResize);
 
     async function startTraining(event) {
         event.preventDefault();
@@ -629,9 +859,12 @@
     async function sendChat() {
         const message = chatInput.value.trim();
         if (!message) return;
+        const previousHistory = [...chatHistory];
         appendMessage('user', message);
         chatInput.value = '';
+        document.getElementById('sendChatButton').disabled = true;
         chatStatus.textContent = 'Thinking...';
+        const typingBubble = showTypingBubble();
 
         try {
             const response = await fetch(`${apiBase}/chat`, {
@@ -639,7 +872,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     message,
-                    history: chatHistory,
+                    history: previousHistory,
                     max_new_tokens: Number(document.getElementById('chatMaxTokens').value),
                     temperature: Number(document.getElementById('chatTemperature').value),
                     top_p: Number(document.getElementById('chatTopP').value),
@@ -650,11 +883,16 @@
             });
             const result = await readJson(response);
             if (!response.ok) throw new Error(result.error || 'Chat failed.');
+            removeTypingBubble(typingBubble);
             appendMessage('assistant', result.reply || '(empty response)');
             chatStatus.textContent = result.used_context ? 'Ready: used training snippets.' : 'Ready: adapter only.';
         } catch (error) {
+            removeTypingBubble(typingBubble);
             appendMessage('assistant', error.message);
             chatStatus.textContent = 'Chat error.';
+        } finally {
+            document.getElementById('sendChatButton').disabled = false;
+            chatInput.focus();
         }
     }
 
@@ -667,11 +905,74 @@
         chatLog.scrollTop = chatLog.scrollHeight;
     }
 
+    function showTypingBubble() {
+        const item = document.createElement('div');
+        item.className = 'message assistant typing';
+        item.setAttribute('aria-label', 'Assistant is typing');
+        item.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
+        chatLog.appendChild(item);
+        chatLog.scrollTop = chatLog.scrollHeight;
+        return item;
+    }
+
+    function removeTypingBubble(item) {
+        if (item && item.parentNode) {
+            item.remove();
+        }
+    }
+
     function clearChat() {
         chatHistory = [];
         chatLog.textContent = '';
         chatStatus.textContent = 'Ready.';
         chatInput.focus();
+    }
+
+    function resetChatControls() {
+        const defaults = {
+            chatMaxTokens: 160,
+            chatTemperature: 0.7,
+            chatTopP: 0.9,
+            adapterScale: 1.0,
+            contextLimit: 6,
+            contextChars: 1000
+        };
+        for (const [id, value] of Object.entries(defaults)) {
+            document.getElementById(id).value = value;
+        }
+        updateChatControlReadouts();
+        chatStatus.textContent = 'Chat controls reset.';
+    }
+
+    function updateChatControlReadouts() {
+        for (const input of document.querySelectorAll('.chat-settings input[type="range"]')) {
+            const output = document.getElementById(input.dataset.output);
+            if (!output) continue;
+            const value = Number(input.value);
+            output.textContent = input.step && Number(input.step) < 1 ? value.toFixed(2) : String(value);
+        }
+    }
+
+    function startChatResize(event) {
+        event.preventDefault();
+        const startY = event.clientY;
+        const startHeight = chatPanel.getBoundingClientRect().height;
+        chatResize.setPointerCapture(event.pointerId);
+
+        function move(pointerEvent) {
+            const nextHeight = Math.min(window.innerHeight - 40, Math.max(560, startHeight + pointerEvent.clientY - startY));
+            chatPanel.style.setProperty('--chat-height', `${Math.round(nextHeight)}px`);
+        }
+
+        function stop() {
+            chatResize.removeEventListener('pointermove', move);
+            chatResize.removeEventListener('pointerup', stop);
+            chatResize.removeEventListener('pointercancel', stop);
+        }
+
+        chatResize.addEventListener('pointermove', move);
+        chatResize.addEventListener('pointerup', stop);
+        chatResize.addEventListener('pointercancel', stop);
     }
 
     async function readJson(response) {
@@ -685,6 +986,7 @@
 
     checkServer();
     pollStatus();
+    updateChatControlReadouts();
 </script>
 </body>
 </html>
