@@ -554,6 +554,9 @@
 
                 <section>
                     <h2>Training Controls</h2>
+                    <div class="actions">
+                        <button id="specPresetButton" type="button" class="secondary">Use My Specs</button>
+                    </div>
                     <div class="toggle-row">
                         <label class="check"><input name="gpu_train" type="checkbox" checked> Prefer GPU</label>
                         <label class="check"><input name="use_qlora" type="checkbox" checked> Use 4-bit QLoRA</label>
@@ -673,6 +676,7 @@
     const filesInput = document.getElementById('files');
     const trainButton = document.getElementById('trainButton');
     const stopButton = document.getElementById('stopButton');
+    const specPresetButton = document.getElementById('specPresetButton');
     const clearButton = document.getElementById('clearButton');
     const refreshButton = document.getElementById('refreshButton');
     const statusEl = document.getElementById('status');
@@ -693,6 +697,7 @@
 
     trainForm.addEventListener('submit', startTraining);
     stopButton.addEventListener('click', stopTraining);
+    specPresetButton.addEventListener('click', applySpecPreset);
     clearButton.addEventListener('click', clearData);
     refreshButton.addEventListener('click', pollStatus);
     document.getElementById('sendChatButton').addEventListener('click', sendChat);
@@ -772,6 +777,22 @@
         } finally {
             clearButton.disabled = false;
             pollStatus();
+        }
+    }
+
+    async function applySpecPreset() {
+        specPresetButton.disabled = true;
+        statusEl.textContent = 'Checking local specs...';
+        try {
+            const response = await fetch(`${apiBase}/spec-preset`);
+            const result = await readJson(response);
+            if (!response.ok) throw new Error(result.error || 'Could not load a spec preset.');
+            applyDefaults(result.values || {});
+            statusEl.textContent = result.message || 'Applied spec preset.';
+        } catch (error) {
+            statusEl.textContent = error.message;
+        } finally {
+            specPresetButton.disabled = false;
         }
     }
 

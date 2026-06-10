@@ -133,6 +133,93 @@ def form_defaults() -> dict:
     }
 
 
+def detected_gpu_vram_gb() -> tuple[str, float | None]:
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            props = torch.cuda.get_device_properties(0)
+            return props.name, props.total_memory / 1024**3
+    except Exception:
+        pass
+
+    nvidia_smi = shutil.which("nvidia-smi")
+    if not nvidia_smi:
+        return "No CUDA GPU detected", None
+
+    try:
+        output = subprocess.check_output(
+            [
+                nvidia_smi,
+                "--query-gpu=name,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).strip()
+    except Exception:
+        return "GPU detection unavailable", None
+
+    first_line = output.splitlines()[0] if output else ""
+    if not first_line:
+        return "GPU detection unavailable", None
+    name, _, memory_mb = first_line.rpartition(",")
+    try:
+        return name.strip() or "CUDA GPU", float(memory_mb.strip()) / 1024
+    except ValueError:
+        return name.strip() or "CUDA GPU", None
+
+
+def spec_preset() -> dict:
+    gpu_name, vram_gb = detected_gpu_vram_gb()
+    values = {
+        "gpu_train": vram_gb is not None,
+        "use_qlora": True,
+        "allow_model_download": True,
+        "batch_size": "1",
+        "grad_accum_steps": "32",
+        "epochs": "1",
+        "max_steps": "",
+        "learning_rate": "5e-5",
+        "optim": "paged_adamw_8bit" if vram_gb is not None else "adamw_torch",
+        "max_length": "512",
+        "chunk_chars": "2500",
+        "chunk_overlap": "300",
+        "lora_rank": "8",
+        "lora_alpha": "16",
+        "lora_dropout": "0.05",
+        "lora_target_mode": "qv",
+        "lora_target_modules": "",
+    }
+
+    if vram_gb is None:
+        message = "Applied a conservative CPU/no-GPU preset."
+    elif vram_gb < 8:
+        message = f"Applied a low-VRAM preset for {gpu_name} ({vram_gb:.1f} GiB VRAM)."
+    elif vram_gb < 12:
+        values.update({
+            "grad_accum_steps": "24",
+            "max_length": "768",
+            "chunk_chars": "3000",
+            "chunk_overlap": "400",
+            "lora_target_mode": "attention",
+        })
+        message = f"Applied a balanced preset for {gpu_name} ({vram_gb:.1f} GiB VRAM)."
+    else:
+        values.update({
+            "grad_accum_steps": "16",
+            "max_length": "1024",
+            "chunk_chars": "3500",
+            "chunk_overlap": "500",
+            "lora_rank": "16",
+            "lora_target_mode": "all",
+        })
+        message = f"Applied a roomier preset for {gpu_name} ({vram_gb:.1f} GiB VRAM)."
+
+    return {"message": message, "gpu_name": gpu_name, "vram_gb": vram_gb, "values": values}
+
+
 @app.after_request
 def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
@@ -326,6 +413,11 @@ def ping():
         "has_hf_token": bool(hf_token),
         "hf_token_length": len(hf_token),
     })
+
+
+@app.route("/spec-preset")
+def spec_preset_route():
+    return jsonify(spec_preset())
 
 
 @app.route("/clear-memory", methods=["POST"])
