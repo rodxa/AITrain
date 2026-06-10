@@ -20,7 +20,10 @@ os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "60")
 OUTPUT_DIR = Path(os.environ.get("TRAIN_OUTPUT_DIR", STORAGE_DIR / "conversation-ai-lora"))
 DEFAULT_TRAIN_MODEL = "google/gemma-4-12B-it"
 RECOMMENDED_INFERENCE_MODEL = "Qwen/Qwen3-Coder-30B-A3B-Instruct"
-MODEL_PATH = os.environ.get("QWEN_MODEL_PATH", os.environ.get("MODEL_PATH", DEFAULT_TRAIN_MODEL))
+MODEL_PATH = os.environ.get(
+    "BASE_MODEL_PATH",
+    os.environ.get("QWEN_MODEL_PATH", os.environ.get("MODEL_PATH", DEFAULT_TRAIN_MODEL)),
+)
 ALLOW_MODEL_DOWNLOAD = os.environ.get("ALLOW_MODEL_DOWNLOAD", "0") == "1"
 USE_QLORA = os.environ.get("USE_QLORA", "1") == "1"
 REQUIRED_MODEL_FILES = {"config.json"}
@@ -250,7 +253,7 @@ def has_understandable_short_reply_context(history: list[dict[str, str]]) -> boo
     if len(recent_user_text) < 12:
         return False
 
-    # Keep reaction-style Xavier replies when there is enough immediately preceding chat to react to.
+    # Keep reaction-style assistant replies when there is enough immediately preceding chat to react to.
     has_real_sentence = any(len(item["content"].split()) >= 3 for item in recent if item["role"] == "user")
     has_multi_turn_context = sum(1 for item in recent if item["role"] == "user") >= 2 or any(
         item["role"] == "assistant" for item in recent[:-1]
@@ -441,7 +444,7 @@ def legacy_helpful_examples_unused() -> list[dict]:
         ),
         (
             "How should I train a style LoRA without making the model useless?",
-            "Mix mostly helpful instruction data with a smaller amount of style data. For your case, 70% helpful examples and 30% Xavier chat style is a good starting point. Keep 1-2 epochs, low LR like `5e-5` to `1e-4`, LoRA rank `8` or `16`, and remove target replies that are only `ok`, `lol`, `?`, links, deleted messages, or media placeholders. The model should learn the vibe without forgetting how to answer, dÃ¼d.",
+            "Mix mostly helpful instruction data with a smaller amount of style data. For your case, 70% helpful examples and 30% personal chat style is a good starting point. Keep 1-2 epochs, low LR like `5e-5` to `1e-4`, LoRA rank `8` or `16`, and remove target replies that are only `ok`, `lol`, `?`, links, deleted messages, or media placeholders. The model should learn the vibe without forgetting how to answer, dÃ¼d.",
         ),
         (
             "What is overfitting in fine-tuning?",
@@ -582,7 +585,7 @@ def helpful_examples() -> list[dict]:
         ),
         (
             "What should I do if my model answers with only 'ok'?",
-            "it learned too many dead replies.\n\nkeep `lol`/`nah`/`damn` only when context explains them. remove `?`, media omitted, deleted msg, link-only stuff. add helpful Xavier-style answers so it learns to answer, not just react.",
+            "it learned too many dead replies.\n\nkeep `lol`/`nah`/`damn` only when context explains them. remove `?`, media omitted, deleted msg, link-only stuff. add helpful style-matched answers so it learns to answer, not just react.",
         ),
         (
             "Can you review this error: ModuleNotFoundError: No module named 'peft'?",
@@ -652,8 +655,8 @@ def helpful_examples() -> list[dict]:
 
     rows = []
     for index, (prompt, response) in enumerate(examples, start=1):
-        system_prompt = XAVIER_SYSTEM_PROMPT if index % 5 == 0 else CODING_SYSTEM_PROMPT
-        source = "xavier_coding_style" if index % 5 == 0 else "coding"
+        system_prompt = HELPFUL_SYSTEM_PROMPT if index % 5 == 0 else CODING_SYSTEM_PROMPT
+        source = "style_coding" if index % 5 == 0 else "coding"
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
@@ -675,7 +678,7 @@ def helpful_examples() -> list[dict]:
 
     path = Path(HELPFUL_DATA_FILE)
     if not path.exists():
-        print(f"Helpful data file not found, using built-in Xavier examples only: {path}", flush=True)
+        print(f"Helpful data file not found, using built-in style examples only: {path}", flush=True)
         return rows
 
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
@@ -686,15 +689,15 @@ def helpful_examples() -> list[dict]:
         if not isinstance(messages, list) or not messages:
             continue
         normalized_messages = (
-            [{"role": "system", "content": XAVIER_SYSTEM_PROMPT}, *messages[1:]]
+            [{"role": "system", "content": HELPFUL_SYSTEM_PROMPT}, *messages[1:]]
             if messages[0].get("role") == "system"
-            else [{"role": "system", "content": XAVIER_SYSTEM_PROMPT}, *messages]
+            else [{"role": "system", "content": HELPFUL_SYSTEM_PROMPT}, *messages]
         )
         rows.append(
             {
                 "path": str(path),
                 "chunk": line_number,
-                "source": "xavier_helpful",
+                "source": "style_helpful",
                 "messages": normalized_messages,
                 "training_intent": BASE_PRESERVATION_NOTE,
                 "text": messages_to_plain_text(normalized_messages),

@@ -301,6 +301,14 @@
             font-size: 16px;
         }
 
+        .compact-button {
+            min-height: 38px;
+            padding: 8px 10px;
+            background: #2b3442;
+            border-color: var(--line);
+            font-size: 12px;
+        }
+
         .chat-log {
             display: grid;
             align-content: start;
@@ -671,6 +679,9 @@
                         <p class="small" id="chatStatus">Ready when an adapter exists.</p>
                     </div>
                     <div class="chat-header-actions">
+                        <button id="exportAdapterButton" type="button" class="compact-button">Export</button>
+                        <button id="importAdapterButton" type="button" class="compact-button">Import</button>
+                        <input id="adapterImportFile" type="file" accept=".zip,application/zip" hidden>
                         <button id="clearChatButton" type="button" class="icon-button" title="Clear chat">×</button>
                     </div>
                 </div>
@@ -746,6 +757,9 @@
     const chatStatus = document.getElementById('chatStatus');
     const chatPanel = document.querySelector('.chat');
     const chatResize = document.getElementById('chatResize');
+    const exportAdapterButton = document.getElementById('exportAdapterButton');
+    const importAdapterButton = document.getElementById('importAdapterButton');
+    const adapterImportFile = document.getElementById('adapterImportFile');
     let pollTimer = null;
     let chatHistory = [];
 
@@ -756,6 +770,9 @@
     refreshButton.addEventListener('click', pollStatus);
     document.getElementById('sendChatButton').addEventListener('click', sendChat);
     document.getElementById('clearChatButton').addEventListener('click', clearChat);
+    exportAdapterButton.addEventListener('click', exportAdapter);
+    importAdapterButton.addEventListener('click', () => adapterImportFile.click());
+    adapterImportFile.addEventListener('change', importAdapter);
     document.getElementById('resetChatControlsButton').addEventListener('click', resetChatControls);
     chatInput.addEventListener('keydown', event => {
         if (event.key === 'Enter' && !event.shiftKey) {
@@ -847,6 +864,56 @@
             statusEl.textContent = error.message;
         } finally {
             specPresetButton.disabled = false;
+        }
+    }
+
+    async function exportAdapter() {
+        exportAdapterButton.disabled = true;
+        chatStatus.textContent = 'Preparing adapter export...';
+        try {
+            const response = await fetch(`${apiBase}/adapter/export`);
+            if (!response.ok) {
+                const result = await readJson(response);
+                throw new Error(result.error || 'Could not export adapter.');
+            }
+            const blob = await response.blob();
+            const disposition = response.headers.get('Content-Disposition') || '';
+            const match = disposition.match(/filename="?([^"]+)"?/i);
+            const filename = match ? match[1] : 'conversation-ai-lora.zip';
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(link.href);
+            chatStatus.textContent = 'Adapter export downloaded.';
+        } catch (error) {
+            chatStatus.textContent = error.message;
+        } finally {
+            exportAdapterButton.disabled = false;
+        }
+    }
+
+    async function importAdapter() {
+        const file = adapterImportFile.files[0];
+        if (!file) return;
+        importAdapterButton.disabled = true;
+        chatStatus.textContent = 'Importing adapter...';
+        try {
+            const formData = new FormData();
+            formData.append('adapter', file);
+            const response = await fetch(`${apiBase}/adapter/import`, { method: 'POST', body: formData });
+            const result = await readJson(response);
+            if (!response.ok) throw new Error(result.error || 'Could not import adapter.');
+            clearChat();
+            chatStatus.textContent = result.message || 'Adapter imported.';
+            pollStatus();
+        } catch (error) {
+            chatStatus.textContent = error.message;
+        } finally {
+            adapterImportFile.value = '';
+            importAdapterButton.disabled = false;
         }
     }
 

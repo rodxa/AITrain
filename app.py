@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
+import zipfile
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_file, send_from_directory
 from werkzeug.utils import secure_filename
 
 
@@ -100,7 +103,7 @@ def current_agent_instructions() -> str:
 
 def form_defaults() -> dict:
     return {
-        "model_path": env_value("QWEN_MODEL_PATH", "MODEL_PATH", default="google/gemma-4-12B-it"),
+        "model_path": env_value("BASE_MODEL_PATH", "QWEN_MODEL_PATH", "MODEL_PATH", default="google/gemma-4-12B-it"),
         "assistant_speaker_name": env_value("ASSISTANT_SPEAKER_NAME"),
         "agent_instructions": current_agent_instructions(),
         "data_mode": env_value("DATA_MODE", default="auto"),
@@ -253,6 +256,36 @@ def unload_chat_model() -> None:
         adapter_scale_state["value"] = None
         if torch is not None and torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+
+def ensure_adapter_idle() -> tuple[dict, int] | None:
+    if training_process and training_process.poll() is None:
+        return {"error": "Training is running. Stop it before changing adapter files."}, 409
+    return None
+
+
+def safe_extract_zip(zip_path: Path, target_dir: Path) -> None:
+    target_dir = target_dir.resolve()
+    with zipfile.ZipFile(zip_path) as archive:
+        for member in archive.infolist():
+            member_path = target_dir / member.filename
+            resolved = member_path.resolve()
+            if target_dir != resolved and target_dir not in resolved.parents:
+                raise ValueError(f"Unsafe zip path: {member.filename}")
+        archive.extractall(target_dir)
+
+
+def find_adapter_root(path: Path) -> Path:
+    direct_config = path / "adapter_config.json"
+    if direct_config.exists():
+        return path
+
+    matches = [item.parent for item in path.rglob("adapter_config.json")]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise FileNotFoundError("Uploaded zip does not contain adapter_config.json.")
+    raise ValueError("Uploaded zip contains multiple adapter_config.json files.")
 
 
 def bool_form(name: str, default: bool = False) -> bool:
@@ -429,6 +462,75 @@ def clear_memory_route():
     return jsonify({"message": "Cleared uploaded files and generated datasets. Adapter files were left alone."})
 
 
+@app.route("/adapter/export")
+def export_adapter_route():
+    idle_error = ensure_adapter_idle()
+    if idle_error:
+        payload, status_code = idle_error
+        return jsonify(payload), status_code
+    if not (ADAPTER_DIR / "adapter_config.json").exists():
+        return jsonify({"error": "No adapter found to export."}), 404
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in ADAPTER_DIR.rglob("*"):
+            if path.is_file():
+                archive.write(path, path.relative_to(ADAPTER_DIR).as_posix())
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=f"{ADAPTER_DIR.name}.zip",
+        mimetype="application/zip",
+        max_age=0,
+    )
+
+
+@app.route("/adapter/import", methods=["POST"])
+def import_adapter_route():
+    idle_error = ensure_adapter_idle()
+    if idle_error:
+        payload, status_code = idle_error
+        return jsonify(payload), status_code
+
+    uploaded_file = request.files.get("adapter")
+    if not uploaded_file or not uploaded_file.filename:
+        return jsonify({"error": "Choose an adapter zip first."}), 400
+    if not uploaded_file.filename.lower().endswith(".zip"):
+        return jsonify({"error": "Adapter import expects a .zip file."}), 400
+
+    unload_chat_model()
+    with tempfile.TemporaryDirectory(prefix="adapter-import-") as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        zip_path = tmp_path / "adapter.zip"
+        extract_dir = tmp_path / "extract"
+        extract_dir.mkdir()
+        uploaded_file.save(zip_path)
+        try:
+            safe_extract_zip(zip_path, extract_dir)
+            adapter_root = find_adapter_root(extract_dir)
+        except (OSError, ValueError, zipfile.BadZipFile, FileNotFoundError) as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        backup_dir = ADAPTER_DIR.with_name(f"{ADAPTER_DIR.name}.backup-import")
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir)
+        if ADAPTER_DIR.exists():
+            ADAPTER_DIR.rename(backup_dir)
+        try:
+            shutil.copytree(adapter_root, ADAPTER_DIR)
+            if backup_dir.exists():
+                shutil.rmtree(backup_dir)
+        except Exception:
+            if ADAPTER_DIR.exists():
+                shutil.rmtree(ADAPTER_DIR)
+            if backup_dir.exists():
+                backup_dir.rename(ADAPTER_DIR)
+            raise
+
+    return jsonify({"message": f"Imported adapter to {ADAPTER_DIR}."})
+
+
 @app.route("/train", methods=["POST"])
 def train():
     global training_process
@@ -463,7 +565,7 @@ def train():
     AGENT_INSTRUCTIONS_FILE.write_text(child_env["AGENT_INSTRUCTIONS"], encoding="utf-8")
 
     controls = {
-        "model_path": ("QWEN_MODEL_PATH", "google/gemma-4-12B-it"),
+        "model_path": ("BASE_MODEL_PATH", "google/gemma-4-12B-it"),
         "assistant_speaker_name": ("ASSISTANT_SPEAKER_NAME", ""),
         "chat_context_min": ("CHAT_CONTEXT_MIN", "1"),
         "chat_context_max": ("CHAT_CONTEXT_MAX", "15"),

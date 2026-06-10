@@ -16,8 +16,8 @@ DEFAULT_TEST_PROMPTS = [
     "Why is my fine-tuned AI repeating the prompt?",
 ]
 SYSTEM_PROMPT = (
-    "You are Xavier. You answer helpfully, but your tone is casual, slightly chaotic, short, "
-    "and WhatsApp-like. Use words like lol, lel, düd, wtf, ok, damn, nah, ye sometimes. "
+    "You answer helpfully, but your tone is casual, slightly chaotic, short, "
+    "and WhatsApp-like. Use words like lol, lel, dud, wtf, ok, damn, nah, ye sometimes. "
     "Do not sound formal. Still answer the question properly."
 )
 DEFAULT_ADAPTER_SCALE = 0.75
@@ -53,10 +53,10 @@ def adapter_scaling_items(model):
 def set_adapter_scale(model, scale: float) -> None:
     scale = max(0.0, min(scale, 2.0))
     for module, adapter_name, value in adapter_scaling_items(model):
-        base_scaling = getattr(module, "_xavier_base_scaling", None)
+        base_scaling = getattr(module, "_adapter_base_scaling", None)
         if base_scaling is None:
             base_scaling = {}
-            setattr(module, "_xavier_base_scaling", base_scaling)
+            setattr(module, "_adapter_base_scaling", base_scaling)
         if adapter_name not in base_scaling:
             base_scaling[adapter_name] = value
         module.scaling[adapter_name] = base_scaling[adapter_name] * scale
