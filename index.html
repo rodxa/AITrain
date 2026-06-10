@@ -114,6 +114,58 @@
             min-width: 0;
         }
 
+        .label-title {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .help {
+            position: relative;
+            display: inline-grid;
+            place-items: center;
+            width: 17px;
+            min-width: 17px;
+            height: 17px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: var(--field);
+            color: var(--muted);
+            cursor: help;
+            font-size: 11px;
+            font-weight: 950;
+            line-height: 1;
+        }
+
+        .help::after {
+            content: attr(data-tip);
+            position: absolute;
+            left: 50%;
+            bottom: calc(100% + 8px);
+            z-index: 10;
+            width: min(260px, 72vw);
+            padding: 9px 10px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: #05070a;
+            color: var(--text);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+            font-size: 12px;
+            font-weight: 650;
+            line-height: 1.4;
+            opacity: 0;
+            pointer-events: none;
+            transform: translate(-50%, 4px);
+            transition: opacity 0.12s ease, transform 0.12s ease;
+        }
+
+        .help:hover::after,
+        .help:focus-visible::after {
+            opacity: 1;
+            transform: translate(-50%, 0);
+        }
+
         input, select, textarea, button {
             font: inherit;
         }
@@ -491,12 +543,12 @@
                 <section>
                     <h2>Training Data</h2>
                     <label>
-                        Files or folder
+                        <span class="label-title">Files or folder <span class="help" tabindex="0" data-tip="The text, chat logs, JSON, or code files used to build the training dataset.">?</span></span>
                         <input id="files" name="files" type="file" multiple webkitdirectory>
                     </label>
                     <div class="grid grid-3">
                         <label>
-                            Data mode
+                            <span class="label-title">Data mode <span class="help" tabindex="0" data-tip="Controls whether uploads become chat reply examples, raw context chunks, or both automatically.">?</span></span>
                             <select name="data_mode" id="dataMode">
                                 <option value="auto">Auto: chat + context</option>
                                 <option value="chat">Chat replies only</option>
@@ -504,22 +556,22 @@
                             </select>
                         </label>
                         <label>
-                            Assistant speaker name
+                            <span class="label-title">Assistant speaker name <span class="help" tabindex="0" data-tip="For chat exports, messages from this name are treated as the assistant replies to learn from.">?</span></span>
                             <input name="assistant_speaker_name" type="text" placeholder="Name in chats, optional">
                         </label>
                         <label>
-                            Dataset seed
+                            <span class="label-title">Dataset seed <span class="help" tabindex="0" data-tip="Makes dataset shuffling and train/eval splitting repeatable when you reuse the same value.">?</span></span>
                             <input name="dataset_seed" type="number" value="42">
                         </label>
                     </div>
                     <label>
-                        System prompt / behavior instructions
+                        <span class="label-title">System prompt / behavior instructions <span class="help" tabindex="0" data-tip="Optional instructions inserted into examples and chat tests to guide the adapter's behavior.">?</span></span>
                         <textarea id="agentInstructions" name="agent_instructions" placeholder="Leave blank for no injected system prompt."></textarea>
                     </label>
                     <div class="toggle-row">
-                        <label class="check"><input name="filter_low_value_replies" type="checkbox" checked> Filter empty, deleted, link-only, and junk replies</label>
-                        <label class="check"><input name="keep_short_replies" type="checkbox" checked> Keep useful short replies with enough context</label>
-                        <label class="check"><input name="allow_model_download" type="checkbox" checked> Allow Hugging Face download</label>
+                        <label class="check"><input name="filter_low_value_replies" type="checkbox" checked> <span class="label-title">Filter empty, deleted, link-only, and junk replies <span class="help" tabindex="0" data-tip="Removes low-information targets so the model does not learn to answer with junk or deleted-message placeholders.">?</span></span></label>
+                        <label class="check"><input name="keep_short_replies" type="checkbox" checked> <span class="label-title">Keep useful short replies with enough context <span class="help" tabindex="0" data-tip="Keeps short reactions only when nearby conversation makes them meaningful.">?</span></span></label>
+                        <label class="check"><input name="allow_model_download" type="checkbox" checked> <span class="label-title">Allow Hugging Face download <span class="help" tabindex="0" data-tip="Lets the server download missing model files from Hugging Face if they are not already cached locally.">?</span></span></label>
                     </div>
                 </section>
 
@@ -527,11 +579,11 @@
                     <h2>Model</h2>
                     <div class="grid">
                         <label>
-                            Base model or local folder
+                            <span class="label-title">Base model or local folder <span class="help" tabindex="0" data-tip="The Hugging Face model ID or local Transformers model folder that the LoRA adapter trains on top of.">?</span></span>
                             <input name="model_path" type="text" value="Qwen/Qwen2.5-3B-Instruct">
                         </label>
                         <label>
-                            Hugging Face token
+                            <span class="label-title">Hugging Face token <span class="help" tabindex="0" data-tip="Optional access token for private or gated models. Leave blank for public models or server env token.">?</span></span>
                             <input id="hfToken" name="hf_token" type="password" placeholder="Optional">
                             <span class="small" id="hfTokenStatus">No env token loaded yet.</span>
                         </label>
@@ -541,14 +593,14 @@
                 <section>
                     <h2>Dataset Shape</h2>
                     <div class="grid grid-3">
-                        <label>Max file bytes <input name="max_file_bytes" type="number" value="200000"></label>
-                        <label>Max chat file bytes <input name="max_conversation_bytes" type="number" value="5242880"></label>
-                        <label>Eval ratio <input name="eval_ratio" type="text" value="0.08"></label>
-                        <label>Chunk chars <input name="chunk_chars" type="number" value="3500"></label>
-                        <label>Chunk overlap <input name="chunk_overlap" type="number" value="500"></label>
-                        <label>Max sequence length <input name="max_length" type="number" value="1024"></label>
-                        <label>Min chat context <input name="chat_context_min" type="number" value="1"></label>
-                        <label>Max chat context <input name="chat_context_max" type="number" value="15"></label>
+                        <label><span class="label-title">Max file bytes <span class="help" tabindex="0" data-tip="Largest regular uploaded file to read. Bigger values include more data but can slow parsing.">?</span></span><input name="max_file_bytes" type="number" value="200000"></label>
+                        <label><span class="label-title">Max chat file bytes <span class="help" tabindex="0" data-tip="Largest chat/log file to read. Chat files get a separate larger limit because exports can be big.">?</span></span><input name="max_conversation_bytes" type="number" value="5242880"></label>
+                        <label><span class="label-title">Eval ratio <span class="help" tabindex="0" data-tip="Fraction of examples held out for evaluation instead of training. 0.08 means about 8 percent.">?</span></span><input name="eval_ratio" type="text" value="0.08"></label>
+                        <label><span class="label-title">Chunk chars <span class="help" tabindex="0" data-tip="Approximate character length for raw context chunks made from uploaded files.">?</span></span><input name="chunk_chars" type="number" value="3500"></label>
+                        <label><span class="label-title">Chunk overlap <span class="help" tabindex="0" data-tip="Characters repeated between neighboring chunks so context is not cut too sharply.">?</span></span><input name="chunk_overlap" type="number" value="500"></label>
+                        <label><span class="label-title">Max sequence length <span class="help" tabindex="0" data-tip="Maximum token length used during training. Higher values use more VRAM.">?</span></span><input name="max_length" type="number" value="1024"></label>
+                        <label><span class="label-title">Min chat context <span class="help" tabindex="0" data-tip="Minimum number of previous messages required before a chat reply can become a training example.">?</span></span><input name="chat_context_min" type="number" value="1"></label>
+                        <label><span class="label-title">Max chat context <span class="help" tabindex="0" data-tip="Maximum number of previous messages included before each learned assistant reply.">?</span></span><input name="chat_context_max" type="number" value="15"></label>
                     </div>
                 </section>
 
@@ -558,27 +610,27 @@
                         <button id="specPresetButton" type="button" class="secondary">Use My Specs</button>
                     </div>
                     <div class="toggle-row">
-                        <label class="check"><input name="gpu_train" type="checkbox" checked> Prefer GPU</label>
-                        <label class="check"><input name="use_qlora" type="checkbox" checked> Use 4-bit QLoRA</label>
+                        <label class="check"><input name="gpu_train" type="checkbox" checked> <span class="label-title">Prefer GPU <span class="help" tabindex="0" data-tip="Uses CUDA when available. Training on CPU is possible but usually very slow.">?</span></span></label>
+                        <label class="check"><input name="use_qlora" type="checkbox" checked> <span class="label-title">Use 4-bit QLoRA <span class="help" tabindex="0" data-tip="Loads the base model in 4-bit mode to greatly reduce VRAM use while training LoRA weights.">?</span></span></label>
                     </div>
                     <div class="grid grid-3">
-                        <label>Batch size <input name="batch_size" type="number" value="1"></label>
-                        <label>Gradient accumulation <input name="grad_accum_steps" type="number" value="16"></label>
-                        <label>Epochs <input name="epochs" type="text" value="1"></label>
-                        <label>Max steps <input name="max_steps" type="number" placeholder="Blank = epochs"></label>
-                        <label>Learning rate <input name="learning_rate" type="text" value="5e-5"></label>
-                        <label>Optimizer <input name="optim" type="text" placeholder="Blank = trainer default"></label>
+                        <label><span class="label-title">Batch size <span class="help" tabindex="0" data-tip="Examples processed at once on the device. Keep this low when VRAM is limited.">?</span></span><input name="batch_size" type="number" value="1"></label>
+                        <label><span class="label-title">Gradient accumulation <span class="help" tabindex="0" data-tip="Number of small batches combined before one optimizer step. Higher values simulate a larger batch with less VRAM.">?</span></span><input name="grad_accum_steps" type="number" value="16"></label>
+                        <label><span class="label-title">Epochs <span class="help" tabindex="0" data-tip="How many full passes to make over the training data. More can overfit small personal datasets.">?</span></span><input name="epochs" type="text" value="1"></label>
+                        <label><span class="label-title">Max steps <span class="help" tabindex="0" data-tip="Optional hard cap on optimizer steps. Leave blank to train by epochs.">?</span></span><input name="max_steps" type="number" placeholder="Blank = epochs"></label>
+                        <label><span class="label-title">Learning rate <span class="help" tabindex="0" data-tip="How strongly the adapter updates each step. Lower is safer for style or small datasets.">?</span></span><input name="learning_rate" type="text" value="5e-5"></label>
+                        <label><span class="label-title">Optimizer <span class="help" tabindex="0" data-tip="Training optimizer name. Blank uses the trainer default, or paged_adamw_8bit for QLoRA on GPU.">?</span></span><input name="optim" type="text" placeholder="Blank = trainer default"></label>
                     </div>
                 </section>
 
                 <section>
                     <h2>LoRA Controls</h2>
                     <div class="grid grid-3">
-                        <label>Rank <input name="lora_rank" type="number" value="16"></label>
-                        <label>Alpha <input name="lora_alpha" type="number" value="16"></label>
-                        <label>Dropout <input name="lora_dropout" type="text" value="0.05"></label>
+                        <label><span class="label-title">Rank <span class="help" tabindex="0" data-tip="Adapter capacity. Higher can learn more but uses more VRAM and can overfit faster.">?</span></span><input name="lora_rank" type="number" value="16"></label>
+                        <label><span class="label-title">Alpha <span class="help" tabindex="0" data-tip="Scales the LoRA update strength. Often set equal to rank or about double rank.">?</span></span><input name="lora_alpha" type="number" value="16"></label>
+                        <label><span class="label-title">Dropout <span class="help" tabindex="0" data-tip="Randomly drops some adapter activations during training to reduce overfitting.">?</span></span><input name="lora_dropout" type="text" value="0.05"></label>
                         <label>
-                            Target preset
+                            <span class="label-title">Target preset <span class="help" tabindex="0" data-tip="Which model layers receive LoRA adapters. More targets can learn more but need more memory.">?</span></span>
                             <select name="lora_target_mode">
                                 <option value="all">All: attention + MLP</option>
                                 <option value="attention">Attention only</option>
@@ -586,7 +638,7 @@
                             </select>
                         </label>
                         <label>
-                            Custom target modules
+                            <span class="label-title">Custom target modules <span class="help" tabindex="0" data-tip="Comma-separated module names to override the preset, such as q_proj,v_proj.">?</span></span>
                             <input name="lora_target_modules" type="text" placeholder="q_proj,v_proj">
                         </label>
                     </div>
@@ -633,19 +685,19 @@
                         <summary>Generation</summary>
                         <div class="chat-settings-body">
                             <div class="control-row">
-                                <label>Max tokens <input id="chatMaxTokens" type="range" min="32" max="1024" step="16" value="160" data-output="chatMaxTokensValue"></label>
+                                <label><span class="label-title">Max tokens <span class="help" tabindex="0" data-tip="Maximum number of new tokens the adapter can generate for one chat reply.">?</span></span><input id="chatMaxTokens" type="range" min="32" max="1024" step="16" value="160" data-output="chatMaxTokensValue"></label>
                                 <span class="value-pill" id="chatMaxTokensValue">160</span>
                             </div>
                             <div class="control-row">
-                                <label>Temperature <input id="chatTemperature" type="range" min="0" max="1.5" step="0.05" value="0.7" data-output="chatTemperatureValue"></label>
+                                <label><span class="label-title">Temperature <span class="help" tabindex="0" data-tip="Controls randomness. Lower is more predictable, higher is more varied.">?</span></span><input id="chatTemperature" type="range" min="0" max="1.5" step="0.05" value="0.7" data-output="chatTemperatureValue"></label>
                                 <span class="value-pill" id="chatTemperatureValue">0.70</span>
                             </div>
                             <div class="control-row">
-                                <label>Top-p <input id="chatTopP" type="range" min="0.1" max="1" step="0.05" value="0.9" data-output="chatTopPValue"></label>
+                                <label><span class="label-title">Top-p <span class="help" tabindex="0" data-tip="Limits sampling to the most likely token group. Lower values make replies more focused.">?</span></span><input id="chatTopP" type="range" min="0.1" max="1" step="0.05" value="0.9" data-output="chatTopPValue"></label>
                                 <span class="value-pill" id="chatTopPValue">0.90</span>
                             </div>
                             <div class="control-row">
-                                <label>Adapter scale <input id="adapterScale" type="range" min="0" max="2" step="0.05" value="1.0" data-output="adapterScaleValue"></label>
+                                <label><span class="label-title">Adapter scale <span class="help" tabindex="0" data-tip="Adjusts how strongly the LoRA adapter influences replies. 1.0 is normal, 0 disables it.">?</span></span><input id="adapterScale" type="range" min="0" max="2" step="0.05" value="1.0" data-output="adapterScaleValue"></label>
                                 <span class="value-pill" id="adapterScaleValue">1.00</span>
                             </div>
                         </div>
@@ -654,11 +706,11 @@
                         <summary>Training Context</summary>
                         <div class="chat-settings-body">
                             <div class="control-row">
-                                <label>Snippets <input id="contextLimit" type="range" min="0" max="16" step="1" value="6" data-output="contextLimitValue"></label>
+                                <label><span class="label-title">Snippets <span class="help" tabindex="0" data-tip="How many matching training-data chunks to include as context when testing the adapter.">?</span></span><input id="contextLimit" type="range" min="0" max="16" step="1" value="6" data-output="contextLimitValue"></label>
                                 <span class="value-pill" id="contextLimitValue">6</span>
                             </div>
                             <div class="control-row">
-                                <label>Snippet chars <input id="contextChars" type="range" min="200" max="4000" step="100" value="1000" data-output="contextCharsValue"></label>
+                                <label><span class="label-title">Snippet chars <span class="help" tabindex="0" data-tip="Maximum characters taken from each retrieved training-data snippet.">?</span></span><input id="contextChars" type="range" min="200" max="4000" step="100" value="1000" data-output="contextCharsValue"></label>
                                 <span class="value-pill" id="contextCharsValue">1000</span>
                             </div>
                         </div>
