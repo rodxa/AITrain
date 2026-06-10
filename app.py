@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import json
 import os
 import re
@@ -9,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -71,6 +71,8 @@ chat_lock = threading.Lock()
 chat_state = {"model": None, "tokenizer": None, "torch": None, "adapter_dir": None}
 context_cache = {"mtime": None, "rows": []}
 adapter_scale_state = {"value": None}
+export_jobs: dict[str, dict] = {}
+imported_adapter_hf_token = {"value": ""}
 
 
 def env_hf_token() -> str:
@@ -331,9 +333,10 @@ def get_chat_model(adapter_dir: Path):
         from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
         base_model = load_adapter_base_model(adapter_dir)
+        hf_token = imported_adapter_hf_token.get("value") or env_hf_token() or None
         cuda_available = torch.cuda.is_available()
         bf16_available = cuda_available and torch.cuda.is_bf16_supported()
-        tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True, token=hf_token)
         tokenizer.pad_token = tokenizer.pad_token or tokenizer.eos_token
 
         model_kwargs = {"trust_remote_code": True, "device_map": "auto"}
@@ -347,7 +350,7 @@ def get_chat_model(adapter_dir: Path):
         else:
             model_kwargs["torch_dtype"] = torch.bfloat16 if bf16_available else torch.float16 if cuda_available else None
 
-        model = AutoModelForCausalLM.from_pretrained(base_model, **model_kwargs)
+        model = AutoModelForCausalLM.from_pretrained(base_model, token=hf_token, **model_kwargs)
         model = PeftModel.from_pretrained(model, adapter_dir)
         model.eval()
         chat_state.update({"model": model, "tokenizer": tokenizer, "torch": torch, "adapter_dir": str(adapter_dir)})
@@ -437,6 +440,7 @@ def ping():
         "ok": True,
         "storage_dir": str(STORAGE_DIR),
         "adapter_ready": (ADAPTER_DIR / "adapter_config.json").exists(),
+        "chat_model_loaded": chat_state["model"] is not None,
         "agent_instructions": current_agent_instructions(),
         "defaults": form_defaults(),
         "env_files": {
@@ -471,19 +475,87 @@ def export_adapter_route():
     if not (ADAPTER_DIR / "adapter_config.json").exists():
         return jsonify({"error": "No adapter found to export."}), 404
 
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for path in ADAPTER_DIR.rglob("*"):
-            if path.is_file():
-                archive.write(path, path.relative_to(ADAPTER_DIR).as_posix())
-    buffer.seek(0)
-    return send_file(
-        buffer,
+    tmp_dir = Path(tempfile.mkdtemp(prefix="adapter-export-"))
+    archive_path = Path(shutil.make_archive(str(tmp_dir / ADAPTER_DIR.name), "zip", ADAPTER_DIR))
+    response = send_file(
+        archive_path,
         as_attachment=True,
         download_name=f"{ADAPTER_DIR.name}.zip",
         mimetype="application/zip",
+        conditional=False,
         max_age=0,
     )
+
+    @response.call_on_close
+    def cleanup_export_archive():
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return response
+
+
+@app.route("/adapter/export/start", methods=["POST"])
+def start_adapter_export_route():
+    idle_error = ensure_adapter_idle()
+    if idle_error:
+        payload, status_code = idle_error
+        return jsonify(payload), status_code
+    if not (ADAPTER_DIR / "adapter_config.json").exists():
+        return jsonify({"error": "No adapter found to export."}), 404
+
+    job_id = uuid.uuid4().hex
+    tmp_dir = Path(tempfile.mkdtemp(prefix="adapter-export-"))
+    export_jobs[job_id] = {"status": "running", "tmp_dir": tmp_dir, "archive_path": None, "error": ""}
+
+    def build_export() -> None:
+        try:
+            archive_path = Path(shutil.make_archive(str(tmp_dir / ADAPTER_DIR.name), "zip", ADAPTER_DIR))
+            export_jobs[job_id].update({"status": "ready", "archive_path": archive_path})
+        except Exception as exc:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            export_jobs[job_id].update({"status": "error", "error": str(exc)})
+
+    threading.Thread(target=build_export, daemon=True).start()
+    return jsonify({"job_id": job_id, "message": "Adapter export is being prepared."})
+
+
+@app.route("/adapter/export/status/<job_id>")
+def adapter_export_status_route(job_id: str):
+    job = export_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Export job not found."}), 404
+    payload = {"status": job["status"]}
+    if job["status"] == "ready":
+        payload["download_url"] = f"/adapter/export/download/{job_id}"
+    if job["status"] == "error":
+        payload["error"] = job.get("error") or "Could not prepare adapter export."
+    return jsonify(payload)
+
+
+@app.route("/adapter/export/download/<job_id>")
+def download_adapter_export_route(job_id: str):
+    job = export_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Export job not found."}), 404
+    if job["status"] != "ready" or not job.get("archive_path"):
+        return jsonify({"error": "Export is not ready yet."}), 409
+
+    archive_path = Path(job["archive_path"])
+    response = send_file(
+        archive_path,
+        as_attachment=True,
+        download_name=f"{ADAPTER_DIR.name}.zip",
+        mimetype="application/zip",
+        conditional=False,
+        max_age=0,
+    )
+
+    @response.call_on_close
+    def cleanup_export_job():
+        finished = export_jobs.pop(job_id, None)
+        if finished:
+            shutil.rmtree(finished["tmp_dir"], ignore_errors=True)
+
+    return response
 
 
 @app.route("/adapter/import", methods=["POST"])
@@ -499,6 +571,7 @@ def import_adapter_route():
     if not uploaded_file.filename.lower().endswith(".zip"):
         return jsonify({"error": "Adapter import expects a .zip file."}), 400
 
+    hf_token = request.form.get("hf_token", "").strip()
     unload_chat_model()
     with tempfile.TemporaryDirectory(prefix="adapter-import-") as tmp_dir:
         tmp_path = Path(tmp_dir)
@@ -528,7 +601,11 @@ def import_adapter_route():
                 backup_dir.rename(ADAPTER_DIR)
             raise
 
-    return jsonify({"message": f"Imported adapter to {ADAPTER_DIR}."})
+    imported_adapter_hf_token["value"] = hf_token
+    return jsonify({
+        "message": f"Imported adapter to {ADAPTER_DIR}.",
+        "has_hf_token": bool(hf_token),
+    })
 
 
 @app.route("/train", methods=["POST"])
@@ -603,6 +680,7 @@ def train():
     child_env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
     hf_token = request.form.get("hf_token", "").strip()
+    imported_adapter_hf_token["value"] = hf_token
     if hf_token:
         child_env["HF_TOKEN"] = hf_token
         child_env["HUGGING_FACE_HUB_TOKEN"] = hf_token
@@ -646,6 +724,7 @@ def status():
         "log": log[-10000:],
         "storage_dir": str(STORAGE_DIR),
         "adapter_ready": (ADAPTER_DIR / "adapter_config.json").exists(),
+        "chat_model_loaded": chat_state["model"] is not None,
     })
 
 
@@ -707,4 +786,4 @@ def chat():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, use_reloader=False)
+    app.run(debug=True, use_reloader=False, threaded=True)

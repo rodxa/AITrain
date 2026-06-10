@@ -371,6 +371,22 @@
             }
         }
 
+        .loading-weights {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .loading-ring {
+            width: 20px;
+            min-width: 20px;
+            height: 20px;
+            border: 3px solid rgba(157, 167, 183, 0.32);
+            border-top-color: var(--accent);
+            border-radius: 999px;
+            animation: spin 0.8s linear infinite;
+        }
+
         .chat-controls {
             display: grid;
             gap: 10px;
@@ -517,6 +533,71 @@
             line-height: 1.4;
         }
 
+        .busy-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            display: none;
+            place-items: center;
+            padding: 20px;
+            background: rgba(5, 7, 10, 0.72);
+            backdrop-filter: blur(3px);
+        }
+
+        .busy-overlay.active {
+            display: grid;
+        }
+
+        .busy-dialog {
+            display: grid;
+            justify-items: center;
+            gap: 12px;
+            width: min(340px, 100%);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 22px;
+            background: var(--panel);
+            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.48);
+            text-align: center;
+        }
+
+        .import-dialog {
+            justify-items: stretch;
+            width: min(460px, 100%);
+            text-align: left;
+        }
+
+        .dialog-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        .busy-spinner {
+            width: 34px;
+            height: 34px;
+            border: 3px solid rgba(157, 167, 183, 0.32);
+            border-top-color: var(--accent);
+            border-radius: 999px;
+            animation: spin 0.8s linear infinite;
+        }
+
+        .busy-title {
+            color: var(--text);
+            font-size: 16px;
+            font-weight: 900;
+        }
+
+        .busy-message {
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
         @media (max-width: 1080px) {
             header, .layout, .grid, .grid-3, .toggle-row { grid-template-columns: 1fr; }
             .status-bar { justify-content: flex-start; }
@@ -534,7 +615,7 @@
     </style>
 </head>
 <body>
-<main>
+<main id="appMain">
     <header>
         <div>
             <h1>AI Training Control</h1>
@@ -681,7 +762,6 @@
                     <div class="chat-header-actions">
                         <button id="exportAdapterButton" type="button" class="compact-button">Export</button>
                         <button id="importAdapterButton" type="button" class="compact-button">Import</button>
-                        <input id="adapterImportFile" type="file" accept=".zip,application/zip" hidden>
                         <button id="clearChatButton" type="button" class="icon-button" title="Clear chat">×</button>
                     </div>
                 </div>
@@ -735,6 +815,32 @@
     </div>
 </main>
 
+<div class="busy-overlay" id="busyOverlay" aria-hidden="true">
+    <div class="busy-dialog" id="busyDialog" role="alertdialog" aria-modal="true" aria-labelledby="busyTitle" aria-describedby="busyMessage" tabindex="-1">
+        <div class="busy-spinner" aria-hidden="true"></div>
+        <div class="busy-title" id="busyTitle">Working...</div>
+        <div class="busy-message" id="busyMessage">Please wait.</div>
+    </div>
+</div>
+
+<div class="busy-overlay" id="adapterImportOverlay" aria-hidden="true">
+    <div class="busy-dialog import-dialog" id="adapterImportDialog" role="dialog" aria-modal="true" aria-labelledby="adapterImportTitle" tabindex="-1">
+        <div class="busy-title" id="adapterImportTitle">Import Adapter</div>
+        <label>
+            <span class="label-title">Adapter zip <span class="help" tabindex="0" data-tip="Choose the exported LoRA adapter zip. The zip must contain adapter_config.json.">?</span></span>
+            <input id="adapterImportFile" type="file" accept=".zip,application/zip">
+        </label>
+        <label>
+            <span class="label-title">Hugging Face token <span class="help" tabindex="0" data-tip="Optional. Needed for private or gated base models used by the imported adapter.">?</span></span>
+            <input id="adapterImportToken" type="password" placeholder="Optional token for the base model">
+        </label>
+        <div class="dialog-actions">
+            <button id="cancelAdapterImportButton" type="button" class="secondary">Cancel</button>
+            <button id="confirmAdapterImportButton" type="button" class="good">Import</button>
+        </div>
+    </div>
+</div>
+
 <script>
     const apiBase = `${location.protocol}//${location.host}`;
     const trainForm = document.getElementById('trainForm');
@@ -760,8 +866,19 @@
     const exportAdapterButton = document.getElementById('exportAdapterButton');
     const importAdapterButton = document.getElementById('importAdapterButton');
     const adapterImportFile = document.getElementById('adapterImportFile');
+    const adapterImportToken = document.getElementById('adapterImportToken');
+    const adapterImportOverlay = document.getElementById('adapterImportOverlay');
+    const adapterImportDialog = document.getElementById('adapterImportDialog');
+    const cancelAdapterImportButton = document.getElementById('cancelAdapterImportButton');
+    const confirmAdapterImportButton = document.getElementById('confirmAdapterImportButton');
+    const appMain = document.getElementById('appMain');
+    const busyOverlay = document.getElementById('busyOverlay');
+    const busyDialog = document.getElementById('busyDialog');
+    const busyTitle = document.getElementById('busyTitle');
+    const busyMessage = document.getElementById('busyMessage');
     let pollTimer = null;
     let chatHistory = [];
+    let chatModelLoaded = false;
 
     trainForm.addEventListener('submit', startTraining);
     stopButton.addEventListener('click', stopTraining);
@@ -771,8 +888,9 @@
     document.getElementById('sendChatButton').addEventListener('click', sendChat);
     document.getElementById('clearChatButton').addEventListener('click', clearChat);
     exportAdapterButton.addEventListener('click', exportAdapter);
-    importAdapterButton.addEventListener('click', () => adapterImportFile.click());
-    adapterImportFile.addEventListener('change', importAdapter);
+    importAdapterButton.addEventListener('click', openAdapterImportDialog);
+    cancelAdapterImportButton.addEventListener('click', closeAdapterImportDialog);
+    confirmAdapterImportButton.addEventListener('click', importAdapter);
     document.getElementById('resetChatControlsButton').addEventListener('click', resetChatControls);
     chatInput.addEventListener('keydown', event => {
         if (event.key === 'Enter' && !event.shiftKey) {
@@ -784,6 +902,63 @@
         input.addEventListener('input', updateChatControlReadouts);
     }
     chatResize.addEventListener('pointerdown', startChatResize);
+    busyOverlay.addEventListener('pointerdown', event => {
+        event.preventDefault();
+        busyDialog.focus();
+    });
+    adapterImportOverlay.addEventListener('pointerdown', event => {
+        if (event.target === adapterImportOverlay) {
+            event.preventDefault();
+            adapterImportDialog.focus();
+        }
+    });
+    document.addEventListener('keydown', event => {
+        if (adapterImportOverlay.classList.contains('active') && event.key === 'Escape') {
+            event.preventDefault();
+            closeAdapterImportDialog();
+            return;
+        }
+        if (!busyOverlay.classList.contains('active')) return;
+        if (event.key === 'Tab' || event.key === 'Escape') {
+            event.preventDefault();
+            busyDialog.focus();
+        }
+    });
+
+    function showBusy(title = 'Working...', message = 'Please wait.') {
+        busyTitle.textContent = title;
+        busyMessage.textContent = message;
+        appMain.inert = true;
+        appMain.setAttribute('aria-busy', 'true');
+        busyOverlay.classList.add('active');
+        busyOverlay.setAttribute('aria-hidden', 'false');
+        busyDialog.focus();
+    }
+
+    function hideBusy() {
+        busyOverlay.classList.remove('active');
+        busyOverlay.setAttribute('aria-hidden', 'true');
+        appMain.inert = false;
+        appMain.removeAttribute('aria-busy');
+    }
+
+    function wait(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function openAdapterImportDialog() {
+        adapterImportToken.value = hfToken.value || '';
+        adapterImportOverlay.classList.add('active');
+        adapterImportOverlay.setAttribute('aria-hidden', 'false');
+        appMain.inert = true;
+        adapterImportDialog.focus();
+    }
+
+    function closeAdapterImportDialog() {
+        adapterImportOverlay.classList.remove('active');
+        adapterImportOverlay.setAttribute('aria-hidden', 'true');
+        appMain.inert = false;
+    }
 
     async function startTraining(event) {
         event.preventDefault();
@@ -805,23 +980,28 @@
         stopButton.disabled = false;
         statusEl.textContent = `Uploading ${filesInput.files.length} files...`;
         logEl.textContent = '';
+        showBusy('Starting training...', `Uploading ${filesInput.files.length} files. Keep this page open.`);
 
         try {
             const response = await fetch(`${apiBase}/train`, { method: 'POST', body: formData });
             const result = await readJson(response);
             if (!response.ok) throw new Error(result.error || 'Could not start training.');
+            chatModelLoaded = false;
             statusEl.textContent = `Training started with ${result.files} files.`;
             startPolling();
         } catch (error) {
             statusEl.textContent = error.message;
             trainButton.disabled = false;
             stopButton.disabled = true;
+        } finally {
+            hideBusy();
         }
     }
 
     async function stopTraining() {
         stopButton.disabled = true;
         statusEl.textContent = 'Stopping training...';
+        showBusy('Stopping training...', 'Waiting for the training process to exit.');
         try {
             const response = await fetch(`${apiBase}/stop`, { method: 'POST' });
             const result = await readJson(response);
@@ -832,15 +1012,18 @@
             trainButton.disabled = false;
             clearInterval(pollTimer);
             pollStatus();
+            hideBusy();
         }
     }
 
     async function clearData() {
         clearButton.disabled = true;
+        showBusy('Clearing data...', 'Removing uploaded files and generated datasets.');
         try {
             const response = await fetch(`${apiBase}/clear-memory`, { method: 'POST' });
             const result = await readJson(response);
             if (!response.ok) throw new Error(result.error || 'Could not clear data.');
+            chatModelLoaded = false;
             statusEl.textContent = result.message;
             logEl.textContent = '';
         } catch (error) {
@@ -848,12 +1031,14 @@
         } finally {
             clearButton.disabled = false;
             pollStatus();
+            hideBusy();
         }
     }
 
     async function applySpecPreset() {
         specPresetButton.disabled = true;
         statusEl.textContent = 'Checking local specs...';
+        showBusy('Checking specs...', 'Detecting your GPU and applying safe training values.');
         try {
             const response = await fetch(`${apiBase}/spec-preset`);
             const result = await readJson(response);
@@ -864,32 +1049,40 @@
             statusEl.textContent = error.message;
         } finally {
             specPresetButton.disabled = false;
+            hideBusy();
         }
     }
 
     async function exportAdapter() {
         exportAdapterButton.disabled = true;
         chatStatus.textContent = 'Preparing adapter export...';
+        showBusy('Exporting adapter...', 'Building the adapter zip. This can take a moment.');
         try {
-            const response = await fetch(`${apiBase}/adapter/export`);
-            if (!response.ok) {
-                const result = await readJson(response);
-                throw new Error(result.error || 'Could not export adapter.');
+            const startResponse = await fetch(`${apiBase}/adapter/export/start`, { method: 'POST' });
+            const startResult = await readJson(startResponse);
+            if (!startResponse.ok) throw new Error(startResult.error || 'Could not start adapter export.');
+
+            let downloadUrl = '';
+            for (let attempt = 0; attempt < 300; attempt += 1) {
+                await wait(1000);
+                const statusResponse = await fetch(`${apiBase}/adapter/export/status/${startResult.job_id}`);
+                const statusResult = await readJson(statusResponse);
+                if (!statusResponse.ok) throw new Error(statusResult.error || 'Could not check export status.');
+                if (statusResult.status === 'error') throw new Error(statusResult.error || 'Could not prepare adapter export.');
+                if (statusResult.status === 'ready') {
+                    downloadUrl = statusResult.download_url;
+                    break;
+                }
+                busyMessage.textContent = `Building the adapter zip... ${attempt + 1}s`;
             }
-            const blob = await response.blob();
-            const disposition = response.headers.get('Content-Disposition') || '';
-            const match = disposition.match(/filename="?([^"]+)"?/i);
-            const filename = match ? match[1] : 'conversation-ai-lora.zip';
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = filename;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            URL.revokeObjectURL(link.href);
-            chatStatus.textContent = 'Adapter export downloaded.';
+
+            if (!downloadUrl) throw new Error('Adapter export timed out.');
+            hideBusy();
+            window.location.href = `${apiBase}${downloadUrl}`;
+            chatStatus.textContent = 'Adapter export ready. Download should start now.';
         } catch (error) {
             chatStatus.textContent = error.message;
+            hideBusy();
         } finally {
             exportAdapterButton.disabled = false;
         }
@@ -897,15 +1090,24 @@
 
     async function importAdapter() {
         const file = adapterImportFile.files[0];
-        if (!file) return;
+        if (!file) {
+            chatStatus.textContent = 'Choose an adapter zip first.';
+            adapterImportFile.focus();
+            return;
+        }
+        confirmAdapterImportButton.disabled = true;
         importAdapterButton.disabled = true;
         chatStatus.textContent = 'Importing adapter...';
+        closeAdapterImportDialog();
+        showBusy('Importing adapter...', 'Uploading and replacing the current adapter.');
         try {
             const formData = new FormData();
             formData.append('adapter', file);
+            formData.append('hf_token', adapterImportToken.value.trim());
             const response = await fetch(`${apiBase}/adapter/import`, { method: 'POST', body: formData });
             const result = await readJson(response);
             if (!response.ok) throw new Error(result.error || 'Could not import adapter.');
+            chatModelLoaded = false;
             clearChat();
             chatStatus.textContent = result.message || 'Adapter imported.';
             pollStatus();
@@ -913,7 +1115,10 @@
             chatStatus.textContent = error.message;
         } finally {
             adapterImportFile.value = '';
+            adapterImportToken.value = '';
+            confirmAdapterImportButton.disabled = false;
             importAdapterButton.disabled = false;
+            hideBusy();
         }
     }
 
@@ -932,6 +1137,7 @@
             storagePill.textContent = `Storage: ${result.storage_dir || 'unknown'}`;
             adapterPill.textContent = result.adapter_ready ? 'Adapter: ready' : 'Adapter: missing';
             serverPill.textContent = 'Server: connected';
+            chatModelLoaded = Boolean(result.chat_model_loaded);
 
             if (result.running) {
                 statusEl.textContent = 'Training running...';
@@ -959,6 +1165,7 @@
             serverPill.textContent = 'Server: connected';
             adapterPill.textContent = result.adapter_ready ? 'Adapter: ready' : 'Adapter: missing';
             storagePill.textContent = `Storage: ${result.storage_dir}`;
+            chatModelLoaded = Boolean(result.chat_model_loaded);
             applyDefaults(result.defaults || {});
             if (result.has_hf_token) {
                 hfToken.placeholder = `Using server env token (${result.hf_token_length} chars)`;
@@ -1005,8 +1212,8 @@
         appendMessage('user', message);
         chatInput.value = '';
         document.getElementById('sendChatButton').disabled = true;
-        chatStatus.textContent = 'Thinking...';
-        const typingBubble = showTypingBubble();
+        chatStatus.textContent = chatModelLoaded ? 'Thinking...' : 'Loading adapter weights...';
+        const typingBubble = chatModelLoaded ? showTypingBubble() : showLoadingWeightsBubble();
 
         try {
             const response = await fetch(`${apiBase}/chat`, {
@@ -1025,6 +1232,7 @@
             });
             const result = await readJson(response);
             if (!response.ok) throw new Error(result.error || 'Chat failed.');
+            chatModelLoaded = true;
             removeTypingBubble(typingBubble);
             appendMessage('assistant', result.reply || '(empty response)');
             chatStatus.textContent = result.used_context ? 'Ready: used training snippets.' : 'Ready: adapter only.';
@@ -1052,6 +1260,15 @@
         item.className = 'message assistant typing';
         item.setAttribute('aria-label', 'Assistant is typing');
         item.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
+        chatLog.appendChild(item);
+        chatLog.scrollTop = chatLog.scrollHeight;
+        return item;
+    }
+
+    function showLoadingWeightsBubble() {
+        const item = document.createElement('div');
+        item.className = 'message assistant';
+        item.innerHTML = '<span class="loading-weights"><span class="loading-ring" aria-hidden="true"></span><span>Loading adapter weights...</span></span>';
         chatLog.appendChild(item);
         chatLog.scrollTop = chatLog.scrollHeight;
         return item;
