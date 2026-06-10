@@ -18,7 +18,7 @@ os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")
 os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "60")
 OUTPUT_DIR = Path(os.environ.get("TRAIN_OUTPUT_DIR", STORAGE_DIR / "conversation-ai-lora"))
-DEFAULT_TRAIN_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_TRAIN_MODEL = "google/gemma-4-12B-it"
 RECOMMENDED_INFERENCE_MODEL = "Qwen/Qwen3-Coder-30B-A3B-Instruct"
 MODEL_PATH = os.environ.get("QWEN_MODEL_PATH", os.environ.get("MODEL_PATH", DEFAULT_TRAIN_MODEL))
 ALLOW_MODEL_DOWNLOAD = os.environ.get("ALLOW_MODEL_DOWNLOAD", "0") == "1"

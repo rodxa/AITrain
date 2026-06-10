@@ -74,7 +74,7 @@
             align-items: start;
         }
 
-        form, .chat, .log-panel {
+        form, .chat, .chat-controls, .log-panel {
             border: 1px solid var(--line);
             border-radius: 8px;
             background: var(--panel);
@@ -259,17 +259,18 @@
         .side {
             display: grid;
             gap: 16px;
+            align-self: start;
+            position: sticky;
+            top: 20px;
         }
 
         .chat {
-            position: sticky;
-            top: 20px;
             display: grid;
-            grid-template-rows: auto minmax(220px, 1fr) auto;
-            height: var(--chat-height, min(820px, calc(100dvh - 40px)));
-            min-height: 560px;
-            max-height: calc(100dvh - 40px);
-            overflow: hidden;
+            grid-template-rows: auto minmax(0, 1fr) auto;
+            height: var(--chat-height, min(460px, calc(62dvh - 40px)));
+            min-height: 300px;
+            max-height: calc(100dvh - 220px);
+            overflow: visible;
             padding: 14px;
         }
 
@@ -304,6 +305,7 @@
             display: grid;
             align-content: start;
             gap: 10px;
+            min-height: 0;
             overflow: auto;
             margin: 0;
             padding: 12px 4px 12px 0;
@@ -364,8 +366,8 @@
         .chat-controls {
             display: grid;
             gap: 10px;
-            padding-top: 12px;
-            border-top: 1px solid var(--line);
+            padding: 14px;
+            overflow: visible;
         }
 
         .composer {
@@ -510,8 +512,8 @@
         @media (max-width: 1080px) {
             header, .layout, .grid, .grid-3, .toggle-row { grid-template-columns: 1fr; }
             .status-bar { justify-content: flex-start; }
-            .chat { height: 640px; }
-            .chat { position: static; max-height: none; }
+            .side { position: static; }
+            .chat { height: 420px; max-height: none; }
             .composer { grid-template-columns: 1fr; }
             .composer-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .chat-resize { display: none; }
@@ -519,7 +521,7 @@
 
         @media (max-width: 620px) {
             main { padding: 10px; }
-            form, section, .chat, .log-panel { padding: 10px; }
+            form, section, .chat, .chat-controls, .log-panel { padding: 10px; }
         }
     </style>
 </head>
@@ -580,7 +582,7 @@
                     <div class="grid">
                         <label>
                             <span class="label-title">Base model or local folder <span class="help" tabindex="0" data-tip="The Hugging Face model ID or local Transformers model folder that the LoRA adapter trains on top of.">?</span></span>
-                            <input name="model_path" type="text" value="Qwen/Qwen2.5-3B-Instruct">
+                            <input name="model_path" type="text" value="google/gemma-4-12B-it">
                         </label>
                         <label>
                             <span class="label-title">Hugging Face token <span class="help" tabindex="0" data-tip="Optional access token for private or gated models. Leave blank for public models or server env token.">?</span></span>
@@ -673,50 +675,50 @@
                     </div>
                 </div>
                 <div class="chat-log" id="chatLog"></div>
-                <div class="chat-controls">
-                    <div class="composer">
-                        <textarea id="chatInput" placeholder="Message the trained adapter"></textarea>
-                        <div class="composer-actions">
-                            <button id="sendChatButton" type="button" class="send-button">Send</button>
-                            <button id="resetChatControlsButton" type="button" class="secondary">Reset</button>
+                <button id="chatResize" type="button" class="chat-resize" title="Drag to resize chat"></button>
+            </div>
+            <div class="chat-controls">
+                <div class="composer">
+                    <textarea id="chatInput" placeholder="Message the trained adapter"></textarea>
+                    <div class="composer-actions">
+                        <button id="sendChatButton" type="button" class="send-button">Send</button>
+                        <button id="resetChatControlsButton" type="button" class="secondary">Reset</button>
+                    </div>
+                </div>
+                <details class="chat-settings" open>
+                    <summary>Generation</summary>
+                    <div class="chat-settings-body">
+                        <div class="control-row">
+                            <label><span class="label-title">Max tokens <span class="help" tabindex="0" data-tip="Maximum number of new tokens the adapter can generate for one chat reply.">?</span></span><input id="chatMaxTokens" type="range" min="32" max="1024" step="16" value="160" data-output="chatMaxTokensValue"></label>
+                            <span class="value-pill" id="chatMaxTokensValue">160</span>
+                        </div>
+                        <div class="control-row">
+                            <label><span class="label-title">Temperature <span class="help" tabindex="0" data-tip="Controls randomness. Lower is more predictable, higher is more varied.">?</span></span><input id="chatTemperature" type="range" min="0" max="1.5" step="0.05" value="0.7" data-output="chatTemperatureValue"></label>
+                            <span class="value-pill" id="chatTemperatureValue">0.70</span>
+                        </div>
+                        <div class="control-row">
+                            <label><span class="label-title">Top-p <span class="help" tabindex="0" data-tip="Limits sampling to the most likely token group. Lower values make replies more focused.">?</span></span><input id="chatTopP" type="range" min="0.1" max="1" step="0.05" value="0.9" data-output="chatTopPValue"></label>
+                            <span class="value-pill" id="chatTopPValue">0.90</span>
+                        </div>
+                        <div class="control-row">
+                            <label><span class="label-title">Adapter scale <span class="help" tabindex="0" data-tip="Adjusts how strongly the LoRA adapter influences replies. 1.0 is normal, 0 disables it.">?</span></span><input id="adapterScale" type="range" min="0" max="2" step="0.05" value="1.0" data-output="adapterScaleValue"></label>
+                            <span class="value-pill" id="adapterScaleValue">1.00</span>
                         </div>
                     </div>
-                    <details class="chat-settings" open>
-                        <summary>Generation</summary>
-                        <div class="chat-settings-body">
-                            <div class="control-row">
-                                <label><span class="label-title">Max tokens <span class="help" tabindex="0" data-tip="Maximum number of new tokens the adapter can generate for one chat reply.">?</span></span><input id="chatMaxTokens" type="range" min="32" max="1024" step="16" value="160" data-output="chatMaxTokensValue"></label>
-                                <span class="value-pill" id="chatMaxTokensValue">160</span>
-                            </div>
-                            <div class="control-row">
-                                <label><span class="label-title">Temperature <span class="help" tabindex="0" data-tip="Controls randomness. Lower is more predictable, higher is more varied.">?</span></span><input id="chatTemperature" type="range" min="0" max="1.5" step="0.05" value="0.7" data-output="chatTemperatureValue"></label>
-                                <span class="value-pill" id="chatTemperatureValue">0.70</span>
-                            </div>
-                            <div class="control-row">
-                                <label><span class="label-title">Top-p <span class="help" tabindex="0" data-tip="Limits sampling to the most likely token group. Lower values make replies more focused.">?</span></span><input id="chatTopP" type="range" min="0.1" max="1" step="0.05" value="0.9" data-output="chatTopPValue"></label>
-                                <span class="value-pill" id="chatTopPValue">0.90</span>
-                            </div>
-                            <div class="control-row">
-                                <label><span class="label-title">Adapter scale <span class="help" tabindex="0" data-tip="Adjusts how strongly the LoRA adapter influences replies. 1.0 is normal, 0 disables it.">?</span></span><input id="adapterScale" type="range" min="0" max="2" step="0.05" value="1.0" data-output="adapterScaleValue"></label>
-                                <span class="value-pill" id="adapterScaleValue">1.00</span>
-                            </div>
+                </details>
+                <details class="chat-settings">
+                    <summary>Training Context</summary>
+                    <div class="chat-settings-body">
+                        <div class="control-row">
+                            <label><span class="label-title">Snippets <span class="help" tabindex="0" data-tip="How many matching training-data chunks to include as context when testing the adapter.">?</span></span><input id="contextLimit" type="range" min="0" max="16" step="1" value="6" data-output="contextLimitValue"></label>
+                            <span class="value-pill" id="contextLimitValue">6</span>
                         </div>
-                    </details>
-                    <details class="chat-settings">
-                        <summary>Training Context</summary>
-                        <div class="chat-settings-body">
-                            <div class="control-row">
-                                <label><span class="label-title">Snippets <span class="help" tabindex="0" data-tip="How many matching training-data chunks to include as context when testing the adapter.">?</span></span><input id="contextLimit" type="range" min="0" max="16" step="1" value="6" data-output="contextLimitValue"></label>
-                                <span class="value-pill" id="contextLimitValue">6</span>
-                            </div>
-                            <div class="control-row">
-                                <label><span class="label-title">Snippet chars <span class="help" tabindex="0" data-tip="Maximum characters taken from each retrieved training-data snippet.">?</span></span><input id="contextChars" type="range" min="200" max="4000" step="100" value="1000" data-output="contextCharsValue"></label>
-                                <span class="value-pill" id="contextCharsValue">1000</span>
-                            </div>
+                        <div class="control-row">
+                            <label><span class="label-title">Snippet chars <span class="help" tabindex="0" data-tip="Maximum characters taken from each retrieved training-data snippet.">?</span></span><input id="contextChars" type="range" min="200" max="4000" step="100" value="1000" data-output="contextCharsValue"></label>
+                            <span class="value-pill" id="contextCharsValue">1000</span>
                         </div>
-                    </details>
-                    <button id="chatResize" type="button" class="chat-resize" title="Drag to resize chat"></button>
-                </div>
+                    </div>
+                </details>
             </div>
         </aside>
     </div>
@@ -1033,7 +1035,8 @@
         chatResize.setPointerCapture(event.pointerId);
 
         function move(pointerEvent) {
-            const nextHeight = Math.min(window.innerHeight - 40, Math.max(560, startHeight + pointerEvent.clientY - startY));
+            const maxHeight = Math.max(300, window.innerHeight - 220);
+            const nextHeight = Math.min(maxHeight, Math.max(300, startHeight + pointerEvent.clientY - startY));
             chatPanel.style.setProperty('--chat-height', `${Math.round(nextHeight)}px`);
         }
 

@@ -100,7 +100,7 @@ def current_agent_instructions() -> str:
 
 def form_defaults() -> dict:
     return {
-        "model_path": env_value("QWEN_MODEL_PATH", "MODEL_PATH", default="Qwen/Qwen2.5-3B-Instruct"),
+        "model_path": env_value("QWEN_MODEL_PATH", "MODEL_PATH", default="google/gemma-4-12B-it"),
         "assistant_speaker_name": env_value("ASSISTANT_SPEAKER_NAME"),
         "agent_instructions": current_agent_instructions(),
         "data_mode": env_value("DATA_MODE", default="auto"),
@@ -463,7 +463,7 @@ def train():
     AGENT_INSTRUCTIONS_FILE.write_text(child_env["AGENT_INSTRUCTIONS"], encoding="utf-8")
 
     controls = {
-        "model_path": ("QWEN_MODEL_PATH", "Qwen/Qwen2.5-3B-Instruct"),
+        "model_path": ("QWEN_MODEL_PATH", "google/gemma-4-12B-it"),
         "assistant_speaker_name": ("ASSISTANT_SPEAKER_NAME", ""),
         "chat_context_min": ("CHAT_CONTEXT_MIN", "1"),
         "chat_context_max": ("CHAT_CONTEXT_MAX", "15"),
