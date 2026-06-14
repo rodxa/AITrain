@@ -116,8 +116,8 @@ def form_defaults() -> dict:
         "chunk_chars": env_value("CHUNK_CHARS", default="3500"),
         "chunk_overlap": env_value("CHUNK_OVERLAP", default="500"),
         "max_length": env_value("MAX_LENGTH", default="1024"),
-        "chat_context_min": env_value("CHAT_CONTEXT_MIN", "WHATSAPP_CONTEXT_MIN", default="1"),
-        "chat_context_max": env_value("CHAT_CONTEXT_MAX", "WHATSAPP_CONTEXT_MAX", default="15"),
+        "chat_context_min": env_value("CHAT_CONTEXT_MIN", default="1"),
+        "chat_context_max": env_value("CHAT_CONTEXT_MAX", default="15"),
         "batch_size": env_value("BATCH_SIZE", default="1"),
         "grad_accum_steps": env_value("GRAD_ACCUM_STEPS", default="16"),
         "epochs": env_value("EPOCHS", default="1"),
@@ -426,6 +426,55 @@ def retrieve_context(message: str, limit: int, max_chars: int) -> tuple[str, lis
         sources.append(source)
         snippets.append(f"Source: {source}\n{text}")
     return "\n\n---\n\n".join(snippets), sources
+
+
+def generate_chat_reply(payload: dict) -> dict:
+    message = (payload.get("message") or "").strip()
+    if not message:
+        raise ValueError("Message is required")
+
+    state = get_chat_model(ADAPTER_DIR)
+    model = state["model"]
+    tokenizer = state["tokenizer"]
+    torch = state["torch"]
+    set_adapter_scale(model, float(payload.get("adapter_scale") or 1.0))
+
+    memory_context, sources = retrieve_context(
+        message,
+        int(payload.get("context_limit") or 6),
+        int(payload.get("context_chars") or 1000),
+    )
+    messages = []
+    instructions = current_agent_instructions()
+    if instructions:
+        messages.append({"role": "system", "content": instructions})
+    for item in payload.get("history") or []:
+        if item.get("role") in {"user", "assistant"} and item.get("content"):
+            messages.append({"role": item["role"], "content": item["content"]})
+    if memory_context:
+        messages.append({"role": "user", "content": f"Relevant training data:\n\n{memory_context}\n\nMessage: {message}"})
+    else:
+        messages.append({"role": "user", "content": message})
+
+    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    inputs = tokenizer(text, return_tensors="pt").to(model_input_device(model))
+    temperature = float(payload.get("temperature") or 0.7)
+    args = {
+        **inputs,
+        "max_new_tokens": int(payload.get("max_new_tokens") or 160),
+        "do_sample": temperature > 0,
+        "repetition_penalty": float(payload.get("repetition_penalty") or 1.1),
+        "pad_token_id": tokenizer.eos_token_id,
+    }
+    if temperature > 0:
+        args["temperature"] = temperature
+        args["top_p"] = float(payload.get("top_p") or 0.9)
+
+    with chat_lock:
+        with torch.no_grad():
+            generated = model.generate(**args)
+    reply = tokenizer.decode(generated[0][inputs["input_ids"].shape[-1] :], skip_special_tokens=True).strip()
+    return {"reply": reply, "used_context": bool(memory_context), "sources": sources}
 
 
 @app.route("/")
@@ -739,48 +788,7 @@ def chat():
         return jsonify({"error": "Message is required"}), 400
 
     try:
-        state = get_chat_model(ADAPTER_DIR)
-        model = state["model"]
-        tokenizer = state["tokenizer"]
-        torch = state["torch"]
-        set_adapter_scale(model, float(payload.get("adapter_scale") or 1.0))
-
-        memory_context, sources = retrieve_context(
-            message,
-            int(payload.get("context_limit") or 6),
-            int(payload.get("context_chars") or 1000),
-        )
-        messages = []
-        instructions = current_agent_instructions()
-        if instructions:
-            messages.append({"role": "system", "content": instructions})
-        for item in payload.get("history") or []:
-            if item.get("role") in {"user", "assistant"} and item.get("content"):
-                messages.append({"role": item["role"], "content": item["content"]})
-        if memory_context:
-            messages.append({"role": "user", "content": f"Relevant training data:\n\n{memory_context}\n\nMessage: {message}"})
-        else:
-            messages.append({"role": "user", "content": message})
-
-        text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = tokenizer(text, return_tensors="pt").to(model_input_device(model))
-        temperature = float(payload.get("temperature") or 0.7)
-        args = {
-            **inputs,
-            "max_new_tokens": int(payload.get("max_new_tokens") or 160),
-            "do_sample": temperature > 0,
-            "repetition_penalty": float(payload.get("repetition_penalty") or 1.1),
-            "pad_token_id": tokenizer.eos_token_id,
-        }
-        if temperature > 0:
-            args["temperature"] = temperature
-            args["top_p"] = float(payload.get("top_p") or 0.9)
-
-        with chat_lock:
-            with torch.no_grad():
-                generated = model.generate(**args)
-        reply = tokenizer.decode(generated[0][inputs["input_ids"].shape[-1] :], skip_special_tokens=True).strip()
-        return jsonify({"reply": reply, "used_context": bool(memory_context), "sources": sources})
+        return jsonify(generate_chat_reply(payload))
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

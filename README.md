@@ -13,6 +13,30 @@ python app.py
 
 Open `http://127.0.0.1:5000`.
 
+## Use The Trained AI In VS Code
+
+This repo includes a local VS Code extension in `vscode-extension/`. It connects to the same Flask server and uses the trained adapter through `/chat`.
+
+```powershell
+python serve.py
+```
+
+Then open `vscode-extension/` in VS Code and press `F5`. In the Extension Development Host window, use the Command Palette:
+
+- Click the `Local AI` icon in the left Activity Bar to open the side-window chat
+- `Local AI: Open Chat`
+- `Local AI: Ask`
+- `Local AI: Explain Selection`
+- `Local AI: Replace Selection`
+- `Local AI: Insert Reply`
+- `Local AI: Agent Task`
+
+By default the extension calls `http://127.0.0.1:5000`. Change `localTrainedAi.apiBase` in VS Code settings if your server is somewhere else.
+
+The side-window chat has its own token box. The website's chat token slider does not control VS Code. If long code stops early, raise the sidebar token value and click `Continue`.
+
+Turn on `agent mode` in the side-window chat when you want it to create or edit files. VS Code will ask before applying the actions.
+
 Optional:
 
 ```powershell

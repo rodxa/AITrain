@@ -1,0 +1,130 @@
+{
+  "name": "local-trained-ai-agent",
+  "displayName": "Local Trained AI Agent",
+  "description": "Use the locally trained AI from this project inside VS Code.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:localTrainedAi.chatView",
+    "onCommand:localTrainedAi.ask",
+    "onCommand:localTrainedAi.explainSelection",
+    "onCommand:localTrainedAi.replaceSelection",
+    "onCommand:localTrainedAi.insertReply",
+    "onCommand:localTrainedAi.agentTask",
+    "onCommand:localTrainedAi.openChat"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "localTrainedAi",
+          "title": "CO-MATE",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "localTrainedAi": [
+        {
+          "id": "localTrainedAi.chatView",
+          "name": "Chat",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "localTrainedAi.ask",
+        "title": "Local AI: Ask"
+      },
+      {
+        "command": "localTrainedAi.explainSelection",
+        "title": "Local AI: Explain Selection"
+      },
+      {
+        "command": "localTrainedAi.replaceSelection",
+        "title": "Local AI: Replace Selection"
+      },
+      {
+        "command": "localTrainedAi.insertReply",
+        "title": "Local AI: Insert Reply"
+      },
+      {
+        "command": "localTrainedAi.agentTask",
+        "title": "Local AI: Agent Task"
+      },
+      {
+        "command": "localTrainedAi.openChat",
+        "title": "Local AI: Open Chat"
+      }
+    ],
+    "configuration": {
+      "title": "Local Trained AI Agent",
+      "properties": {
+        "localTrainedAi.apiBase": {
+          "type": "string",
+          "default": "http://127.0.0.1:5000",
+          "description": "Base URL for the local Flask training app."
+        },
+        "localTrainedAi.maxNewTokens": {
+          "type": "number",
+          "default": 2048,
+          "minimum": 16,
+          "maximum": 8192,
+          "description": "Maximum new tokens to request from the local model."
+        },
+        "localTrainedAi.temperature": {
+          "type": "number",
+          "default": 0.35,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Sampling temperature for model replies."
+        },
+        "localTrainedAi.contextLimit": {
+          "type": "number",
+          "default": 6,
+          "minimum": 0,
+          "maximum": 20,
+          "description": "Number of training snippets the server may retrieve."
+        },
+        "localTrainedAi.contextChars": {
+          "type": "number",
+          "default": 1200,
+          "minimum": 0,
+          "maximum": 8000,
+          "description": "Maximum characters per retrieved training snippet."
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "localTrainedAi.explainSelection",
+          "when": "editorHasSelection",
+          "group": "localTrainedAi@1"
+        },
+        {
+          "command": "localTrainedAi.replaceSelection",
+          "when": "editorHasSelection",
+          "group": "localTrainedAi@2"
+        },
+        {
+          "command": "localTrainedAi.insertReply",
+          "group": "localTrainedAi@3"
+        },
+        {
+          "command": "localTrainedAi.agentTask",
+          "group": "localTrainedAi@4"
+        }
+      ]
+    }
+  }
+}
